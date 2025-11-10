@@ -1,16 +1,33 @@
-const admin = require('firebase-admin');
+const { verifyFirebaseToken } = require('../utils/firebaseTokenVerifier');
 
 exports.verify = async (req, res) => {
   const { token } = req.body;
   try {
-    const decoded = await admin.auth().verifyIdToken(token);
-    res.json({ uid: decoded.uid, email: decoded.email });
+    const decoded = await verifyFirebaseToken(token);
+    res.json({
+      uid: decoded.user_id,
+      email: decoded.email,
+      claims: {
+        email_verified: decoded.email_verified,
+        tenant: decoded.firebase?.tenant || null,
+      },
+    });
   } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
+    res.status(401).json({ error: error.message });
   }
 };
 
 exports.getMe = async (req, res) => {
-  // Example placeholder
-  res.json({ user: { email: 'test@example.com', role: 'student' } });
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthenticated' });
+  }
+
+  res.json({
+    user: {
+      uid: req.user.user_id,
+      email: req.user.email,
+      name: req.user.name || req.user.email,
+      role: req.user.firebase?.sign_in_provider === 'custom' ? 'staff' : 'student',
+    },
+  });
 };
