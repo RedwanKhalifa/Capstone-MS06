@@ -1,6 +1,19 @@
 import Constants from "expo-constants";
 
-const deriveExpoHost = (): string | null => {
+const sanitizeEnvValue = (value?: string | null): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "undefined" || trimmed.toLowerCase() === "null") {
+    return null;
+  }
+
+  return trimmed;
+};
+
+const deriveExpoHost = (port: string): string | null => {
   const expoHost =
     Constants.expoConfig?.hostUri ||
     // Expo SDK 50+ exposes hostUri under manifest2.extra.expoClient for Expo Go
@@ -24,11 +37,14 @@ const deriveExpoHost = (): string | null => {
     return null;
   }
 
-  const port = process.env.EXPO_PUBLIC_API_PORT || "5000";
   return `http://${host}:${port}`;
 };
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || deriveExpoHost() || "http://localhost:5000";
+const envUrl = sanitizeEnvValue(process.env.EXPO_PUBLIC_API_URL);
+const envPort = sanitizeEnvValue(process.env.EXPO_PUBLIC_API_PORT);
+const fallbackPort = envPort || "5000";
+
+const API_URL = envUrl || deriveExpoHost(fallbackPort) || `http://localhost:${fallbackPort}`;
 
 export const endpoints = {
   navigation: `${API_URL}/api/navigation`,

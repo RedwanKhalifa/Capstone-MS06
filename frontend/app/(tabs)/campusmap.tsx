@@ -122,7 +122,7 @@ export default function CampusMap() {
           };
           centerOnUser(location);
         }
-      } catch (err) {
+      } catch {
         // non-fatal telemetry errors are ignored
       }
     };
