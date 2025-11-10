@@ -1,5 +1,13 @@
+const mockRooms = [{
+  _id: '507f191e810c19729de860ea',
+  room_id: 'ENG101',
+  coordinates: { x: 10, y: 20 },
+}];
+
+const mockPopulateRooms = jest.fn(() => Promise.resolve(mockRooms));
+
 jest.mock('../models/Room', () => ({
-  find: jest.fn(() => Promise.resolve([{ room_id: 'ENG101' }]))
+  find: jest.fn(() => ({ populate: mockPopulateRooms })),
 }));
 
 jest.setTimeout(10000); // 10 seconds
@@ -11,6 +19,7 @@ describe('Rooms API', () => {
     const res = await request(app).get('/api/rooms');
     expect(res.statusCode).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
+    expect(mockPopulateRooms).toHaveBeenCalledWith('floor');
   });
 });
 

@@ -14,6 +14,7 @@ app.use('/api/rooms', require('./routes/roomRoutes'));
 app.use('/api/connections', require('./routes/connectionRoutes'));
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/system', require('./routes/systemRoutes'));
+app.use('/api/hardware', require('./routes/hardwareRoutes'));
 
 // Only connect to MongoDB when not testing
 if (process.env.NODE_ENV !== 'test') {
