@@ -12,7 +12,14 @@ const deriveExpoHost = (): string | null => {
     return null;
   }
 
-  const host = expoHost.split(":")[0];
+  const normalized = expoHost.includes("://") ? expoHost : `http://${expoHost}`;
+  let host: string | null = null;
+  try {
+    host = new URL(normalized).hostname;
+  } catch (err) {
+    host = null;
+  }
+
   if (!host) {
     return null;
   }
