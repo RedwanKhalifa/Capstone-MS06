@@ -40,11 +40,34 @@ const deriveExpoHost = (port: string): string | null => {
   return `http://${host}:${port}`;
 };
 
+const normalizeEnvUrl = (rawUrl: string | null, fallbackPort: string): string | null => {
+  if (!rawUrl) {
+    return null;
+  }
+
+  const trimmed = rawUrl.trim();
+  const hasProtocol = /^https?:\/\//i.test(trimmed);
+  const candidate = hasProtocol ? trimmed : `http://${trimmed}`;
+
+  try {
+    const parsed = new URL(candidate);
+
+    if (!parsed.port && !hasProtocol && !trimmed.includes(":")) {
+      parsed.port = fallbackPort;
+    }
+
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+};
+
 const envUrl = sanitizeEnvValue(process.env.EXPO_PUBLIC_API_URL);
 const envPort = sanitizeEnvValue(process.env.EXPO_PUBLIC_API_PORT);
 const fallbackPort = envPort || "5000";
 
-const API_URL = envUrl || deriveExpoHost(fallbackPort) || `http://localhost:${fallbackPort}`;
+const API_URL =
+  normalizeEnvUrl(envUrl, fallbackPort) || deriveExpoHost(fallbackPort) || `http://localhost:${fallbackPort}`;
 
 export const endpoints = {
   navigation: `${API_URL}/api/navigation`,
