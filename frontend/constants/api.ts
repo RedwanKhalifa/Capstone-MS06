@@ -68,6 +68,7 @@ const fallbackPort = envPort || "5000";
 
 const API_URL =
   normalizeEnvUrl(envUrl, fallbackPort) || deriveExpoHost(fallbackPort) || `http://localhost:${fallbackPort}`;
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
 
 export const endpoints = {
   navigation: `${API_URL}/api/navigation`,
