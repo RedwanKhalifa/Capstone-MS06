@@ -1,26 +1,14 @@
 {
-  "name": "smart-campus-navigation-backend",
+  "name": "capstone-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "main": "server.js",
+  "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "seed:rooms": "node seed.js",
-    "seed:connections": "node seedConnections.js",
-    "test": "NODE_ENV=test jest --detectOpenHandles"
+    "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
+    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.7",
-    "express": "^4.21.2",
-    "mongoose": "^8.9.5"
-  },
-  "devDependencies": {
-    "jest": "^30.2.0",
-    "supertest": "^7.1.4"
+    "body-parser": "^1.20.2"
   }
 }
