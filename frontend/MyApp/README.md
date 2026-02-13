@@ -10,15 +10,35 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app on a physical Android phone
+2. Start the app on a physical Android phone with Expo Go
 
    ```bash
-   # one-time: build the development client so BLE works
-   npx expo run:android
-
-   # daily use: start the bundler and scan the QR with the dev client (not Expo Go)
-   npx expo start --dev-client
+   # recommended (works across different networks)
+   npm run start
    ```
+
+   If you still get cache/update errors, run:
+
+   ```bash
+   npm run start:clear
+   ```
+
+   > Note: BLE scanning is disabled in Expo Go because it requires a custom native build.
+
+## If you see "Failed to download remote update"
+
+Use this exact recovery order:
+
+1. Update **Expo Go** from the Play Store (updating npm on your laptop does not update Expo Go).
+2. Force stop Expo Go and clear its app cache/storage.
+3. Start Metro with a clean cache:
+
+   ```bash
+   npm run start:clear
+   ```
+
+4. Scan the new QR code from the terminal.
+5. Keep phone + laptop on stable internet and disable VPN/proxy while testing.
 
 In the output, you'll find options to open the app in a
 
