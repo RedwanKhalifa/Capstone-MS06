@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Capstone Test",
-    "slug": "capstone-test",
+    "name": "Capstone-MS06",
+    "slug": "capstone-ms06",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -25,7 +25,7 @@
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
       ],
-      "package": "com.anonymous.capstonetest"
+      "package": "com.anonymous.capstonems06"
     },
     "web": {
       "output": "static",
