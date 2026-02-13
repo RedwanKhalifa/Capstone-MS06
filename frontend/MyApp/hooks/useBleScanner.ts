@@ -1,8 +1,41 @@
 // hooks/useBleScanner.ts
 
+import Constants from "expo-constants";
 import { useEffect, useState } from "react";
 import { Platform, PermissionsAndroid } from "react-native";
-import { BleManager } from "react-native-ble-plx";
+
+type BleManagerType = {
+  onStateChange: (listener: (state: string) => void, emitCurrentState?: boolean) => { remove: () => void };
+  startDeviceScan: (
+    uuids: string[] | null,
+    options: Record<string, unknown> | null,
+    callback: (scanError: unknown, device: { id: string; rssi: number | null } | null) => void
+  ) => void;
+  stopDeviceScan: () => void;
+};
+
+type BleManagerCtor = new () => BleManagerType;
+
+let BleManagerClass: BleManagerCtor | null = null;
+
+function loadBleManagerClass(): BleManagerCtor | null {
+  // Expo Go does not include custom native BLE modules.
+  if (Constants.appOwnership === "expo") {
+    return null;
+  }
+
+  if (!BleManagerClass) {
+    try {
+      const blePlx = require("react-native-ble-plx") as { BleManager: BleManagerCtor };
+      BleManagerClass = blePlx.BleManager;
+    } catch (e) {
+      console.log("BLE module unavailable:", e);
+      BleManagerClass = null;
+    }
+  }
+
+  return BleManagerClass;
+}
 
 export type BeaconSample = {
   mac: string;
@@ -15,11 +48,14 @@ export type UseBleScannerResult = {
   error?: string;
 };
 
-// Create BleManager safely
-let manager: BleManager | null = null;
+let manager: BleManagerType | null = null;
 
 function getBleManager() {
   if (!manager) {
+    const BleManager = loadBleManagerClass();
+
+    if (!BleManager) return null;
+
     try {
       manager = new BleManager();
     } catch (e) {
@@ -27,6 +63,7 @@ function getBleManager() {
       manager = null;
     }
   }
+
   return manager;
 }
 
@@ -40,7 +77,7 @@ export function useBleScanner(): UseBleScannerResult {
     let stateSub: { remove: () => void } | undefined;
 
     if (!mgr) {
-      setError("Bluetooth not available (Expo Go cannot use BLE).");
+      setError("Bluetooth scanning is unavailable in Expo Go.");
       return;
     }
 
@@ -49,8 +86,8 @@ export function useBleScanner(): UseBleScannerResult {
         try {
           const granted = await PermissionsAndroid.requestMultiple([
             PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN as any,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT as any,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN as never,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT as never,
           ]);
 
           const ok = Object.values(granted).every(
@@ -82,11 +119,11 @@ export function useBleScanner(): UseBleScannerResult {
 
             setBeaconData((prev) => {
               const clean = prev.filter((b) => b.mac !== device.id);
-              return [...clean, { mac: device.id, rssi: device.rssi! }];
+              return [...clean, { mac: device.id, rssi: device.rssi }];
             });
           });
 
-          stateSub.remove();
+          stateSub?.remove();
         }
       }, true);
     };
@@ -95,8 +132,7 @@ export function useBleScanner(): UseBleScannerResult {
 
     return () => {
       stateSub?.remove?.();
-      const mgr = getBleManager();
-      if (mgr) mgr.stopDeviceScan();
+      getBleManager()?.stopDeviceScan();
     };
   }, []);
 
