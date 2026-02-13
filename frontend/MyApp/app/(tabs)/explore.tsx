@@ -1,112 +1,191 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+import { IconSymbol } from "../../components/ui/icon-symbol";
+import { useAppState } from "../../context/app-state";
 
-export default function TabTwoScreen() {
+const EMPTY_TEXT = "Add Locations";
+
+const SAMPLE_LOCATIONS = ["ENG 412", "EPH", "DCC", "SCC", "POD"];
+
+export default function SavedScreen() {
+  const { saved, setSaved } = useAppState();
+  const router = useRouter();
+  const [expanded, setExpanded] = useState({
+    favorites: false,
+    wantToGo: false,
+    starred: false,
+  });
+
+  const ensureSample = (category: keyof typeof saved) => {
+    if (saved[category].length > 0) return;
+    setSaved({
+      ...saved,
+      [category]: SAMPLE_LOCATIONS.slice(0, 3),
+    });
+  };
+
+  const renderGroup = (label: string, icon: "heart.fill" | "flag.fill" | "star.fill", key: keyof typeof saved) => {
+    const items = saved[key];
+    const visibleItems = expanded[key] ? items : items.slice(0, 3);
+    return (
+      <View style={styles.group}>
+        <View style={styles.groupHeader}>
+          <View style={styles.groupIconCircle}>
+            <IconSymbol name={icon} color="#f3d400" size={18} />
+          </View>
+          <Text style={styles.groupTitle}>{label}</Text>
+        </View>
+        {items.length === 0 ? (
+          <Pressable onPress={() => ensureSample(key)}>
+            <Text style={styles.addLocation}>{EMPTY_TEXT}</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.groupCard}>
+            {visibleItems.map((item) => (
+              <View key={item} style={styles.locationRow}>
+                <View style={styles.marker} />
+                <View>
+                  <Text style={styles.locationTitle}>{item}</Text>
+                  <Text style={styles.locationSubtitle}>George Vari Engineering and Computing Centre</Text>
+                </View>
+                <Pressable style={styles.startButton} onPress={() => router.push("/")}>
+                  <IconSymbol name="arrow.up.circle.fill" color="#f3d400" size={28} />
+                </Pressable>
+              </View>
+            ))}
+            {items.length > 3 && (
+              <Pressable onPress={() => setExpanded((prev) => ({ ...prev, [key]: !prev[key] }))}>
+                <Text style={styles.showAll}>{expanded[key] ? "Show less" : "Show all"}</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>TMU SMART{"\n"}CAMPUS NAVIGATION</Text>
+        <View style={styles.profileCircle}>
+          <IconSymbol name="person.circle" color="#0b0b0b" size={32} />
+        </View>
+      </View>
+      <View style={styles.savedBadge}>
+        <Text style={styles.savedBadgeText}>SAVED</Text>
+      </View>
+      {renderGroup("Favourites", "heart.fill", "favorites")}
+      {renderGroup("Want to go", "flag.fill", "wantToGo")}
+      {renderGroup("Starred", "star.fill", "starred")}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  container: {
+    flex: 1,
+    backgroundColor: "#f7f0d7",
   },
-  titleContainer: {
-    flexDirection: 'row',
-    gap: 8,
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 100,
+  },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#0b0b0b",
+  },
+  profileCircle: {
+    backgroundColor: "#f3d400",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  savedBadge: {
+    marginTop: 24,
+    alignSelf: "flex-start",
+    backgroundColor: "#2c3ea3",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  savedBadgeText: {
+    color: "#f3d400",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  group: {
+    marginTop: 24,
+  },
+  groupHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  groupIconCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#2c3ea3",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  groupTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#2c3ea3",
+  },
+  addLocation: {
+    marginTop: 12,
+    color: "#1c1c1c",
+    fontWeight: "600",
+  },
+  groupCard: {
+    marginTop: 12,
+    backgroundColor: "#6f7fd4",
+    borderRadius: 16,
+    padding: 12,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.3)",
+    paddingVertical: 10,
+  },
+  marker: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: "#f3d400",
+  },
+  locationTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#111",
+  },
+  locationSubtitle: {
+    fontSize: 12,
+    color: "#111",
+  },
+  startButton: {
+    marginLeft: "auto",
+  },
+  showAll: {
+    marginTop: 8,
+    color: "#f7f0d7",
+    fontWeight: "700",
   },
 });

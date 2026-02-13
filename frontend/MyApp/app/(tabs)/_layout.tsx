@@ -3,7 +3,23 @@ import { IconSymbol } from "../../components/ui/icon-symbol";
 
 export default function TabsLayout() {
   return (
-    <Tabs>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: "#1f2d86",
+        tabBarInactiveTintColor: "#0b0b0b",
+        tabBarStyle: {
+          backgroundColor: "#2f3fa3",
+          borderTopWidth: 0,
+          height: 70,
+          paddingBottom: 10,
+          paddingTop: 10,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+        },
+      }}
+    >
       <Tabs.Screen
         name="index"
         options={{
@@ -17,19 +33,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="explore"
         options={{
-          title: "Explore",
+          title: "Saved",
           tabBarIcon: ({ color }) => (
-            <IconSymbol name="paperplane.fill" color={color} size={28} />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="campusmap"
-        options={{
-          title: "Campus Map",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol name="map.fill" color={color} size={28} />
+            <IconSymbol name="bookmark.fill" color={color} size={28} />
           ),
         }}
       />
@@ -37,9 +43,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="navigation"
         options={{
-          title: "Navigate",
+          title: "Schedule",
           tabBarIcon: ({ color }) => (
-            <IconSymbol name="location.fill" color={color} size={28} />
+            <IconSymbol name="calendar" color={color} size={28} />
           ),
         }}
       />

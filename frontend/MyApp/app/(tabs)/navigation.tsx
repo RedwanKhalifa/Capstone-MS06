@@ -1,294 +1,170 @@
-// app/(tabs)/navigation.tsx
+import React from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
-import React, { useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Platform,
-  ScrollView,
-} from "react-native";
-import Svg, { Line } from "react-native-svg";
+import { IconSymbol } from "../../components/ui/icon-symbol";
+import { useAppState } from "../../context/app-state";
 
-import { useBleScanner } from "../../hooks/useBleScanner";
-import { useLivePosition } from "../../hooks/useLivePosition";
-import {
-  BEACON_META,
-  BEACON_MAC_TO_ID,
-  BeaconId,
-} from "../../constants/beacons";
-import { useHeading } from "../../hooks/useHeading";
+const SAMPLE_SCHEDULE = [
+  {
+    day: "Wednesday",
+    classes: [
+      { name: "COE817 - LEC", time: "11 - 12 PM", room: "LIB072" },
+    ],
+  },
+  {
+    day: "Thursday",
+    classes: [
+      { name: "COE891 - LEC", time: "8 - 11 AM", room: "LIB072" },
+    ],
+  },
+  {
+    day: "Friday",
+    classes: [
+      { name: "COE70B - LEC", time: "2 - 3 PM", room: "ENG103" },
+    ],
+  },
+];
 
-const MAP_WIDTH = 350;
-const MAP_HEIGHT = 300;
-
-export default function NavigationScreen() {
-  // BLE scanner data
-  const { beaconData, bleReady, error } = useBleScanner();
-  const heading = useHeading();
-  const [selectedBeacon, setSelectedBeacon] = useState<BeaconId | null>(null);
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-
-  console.log("SCANNER DATA:", beaconData);
-
-  /**
-   * Convert raw BLE scan results:
-   *   { mac: "...", rssi: -70 }
-   * → { id: "A1", rssi: -70 }
-   */
-  const normalizedBeacons = useMemo(() => {
-    return beaconData
-      .map((b) => {
-        const mac = b.mac.toUpperCase();
-        const id = BEACON_MAC_TO_ID[mac]; // convert MAC → A1/A2/A3
-
-        if (!id) return null; // ignore unknown MACs
-        return { id, rssi: b.rssi };
-      })
-      .filter(Boolean) as { id: BeaconId; rssi: number }[];
-  }, [beaconData]);
-
-  console.log("NORMALIZED:", normalizedBeacons);
-
-  // Compute indoor position based on RSSI
-  const position = useLivePosition(normalizedBeacons);
-
-  console.log("USER POSITION:", position);
-
-  const destinations = useMemo(
-    () =>
-      Object.entries(BEACON_META).map(([id, meta]) => ({
-        id: id as BeaconId,
-        label: `${meta.room} (${id})`,
-        pos: meta.pos,
-      })),
-    []
-  );
-
-  const selectedMeta = selectedBeacon ? BEACON_META[selectedBeacon] : null;
-  const distanceToTarget = useMemo(() => {
-    if (!position || !selectedMeta) return null;
-    const dx = position.x - selectedMeta.pos.x;
-    const dy = position.y - selectedMeta.pos.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  }, [position, selectedMeta]);
-
-  const arrived = distanceToTarget !== null && distanceToTarget < 0.045;
+export default function ScheduleScreen() {
+  const { isLoggedIn } = useAppState();
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Smart Campus Navigation App</Text>
-
-      {/* MAP BOX */}
-      <View style={styles.mapBox}>
-        {/* Guidance line */}
-        {position && selectedMeta && (
-          <Svg pointerEvents="none" style={StyleSheet.absoluteFill}>
-            <Line
-              x1={position.x * MAP_WIDTH}
-              y1={position.y * MAP_HEIGHT}
-              x2={selectedMeta.pos.x * MAP_WIDTH}
-              y2={selectedMeta.pos.y * MAP_HEIGHT}
-              stroke="#1E90FF"
-              strokeWidth={3}
-              strokeDasharray="8 6"
-            />
-          </Svg>
-        )}
-
-        {/* Render Red Beacon Dots */}
-        {Object.entries(BEACON_META).map(([id, meta]) => (
-          <View
-            key={id}
-            style={[
-              styles.beaconDot,
-              {
-                left: meta.pos.x * MAP_WIDTH - 10, // convert 0–1 → pixels
-                top: meta.pos.y * MAP_HEIGHT - 10,
-              },
-            ]}
-          />
-        ))}
-
-        {/* Render Blue User Dot */}
-        {position && (
-          <View
-            style={[
-              styles.userDot,
-              {
-                left: position.x * MAP_WIDTH - 10,
-                top: position.y * MAP_HEIGHT - 10,
-              },
-            ]}
-          />
-        )}
-
-        {/* Heading triangle */}
-        {position && (
-          <View
-            style={[
-              styles.headingPointer,
-              {
-                left: position.x * MAP_WIDTH - 8,
-                top: position.y * MAP_HEIGHT - 24,
-                transform: [{ rotate: `${heading}deg` }],
-              },
-            ]}
-          />
-        )}
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>TMU SMART{"\n"}CAMPUS NAVIGATION</Text>
+        <View style={styles.profileCircle}>
+          <IconSymbol name="person.circle" color="#0b0b0b" size={32} />
+        </View>
       </View>
-
-      {/* Destination dropdown */}
-      <View style={styles.dropdownCard}>
-        <TouchableOpacity
-          style={styles.dropdownToggle}
-          onPress={() => setDropdownOpen((open) => !open)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.dropdownLabel}>
-            {selectedMeta ? selectedMeta.room : "Destination"}
-          </Text>
-        </TouchableOpacity>
-
-        {dropdownOpen && (
-          <ScrollView style={styles.dropdownList}>
-            {destinations.map((dest) => (
-              <TouchableOpacity
-                key={dest.id}
-                style={styles.dropdownItem}
-                onPress={() => {
-                  setSelectedBeacon(dest.id);
-                  setDropdownOpen(false);
-                }}
-              >
-                <Text style={styles.dropdownItemText}>{dest.label}</Text>
-              </TouchableOpacity>
+      <View style={styles.scheduleBadge}>
+        <Text style={styles.scheduleBadgeText}>YOUR SCHEDULE THIS SEMESTER</Text>
+      </View>
+      {!isLoggedIn ? (
+        <View style={styles.emptyCard}>
+          <Text style={styles.emptyText}>Login to see your classes (._.)</Text>
+          <Pressable style={styles.manualButton}>
+            <Text style={styles.manualButtonText}>or create your schedule manually</Text>
+          </Pressable>
+        </View>
+      ) : (
+        SAMPLE_SCHEDULE.map((day) => (
+          <View key={day.day} style={styles.daySection}>
+            <Text style={styles.dayTitle}>{day.day}</Text>
+            {day.classes.map((course) => (
+              <View key={course.name} style={styles.classCard}>
+                <View>
+                  <Text style={styles.classTitle}>{course.name}</Text>
+                  <Text style={styles.classSubtitle}>{course.time}</Text>
+                  <Text style={styles.classSubtitle}>{course.room}</Text>
+                </View>
+                <Pressable style={styles.startButton}>
+                  <IconSymbol name="paperplane.fill" color="#fff" size={16} />
+                  <Text style={styles.startButtonText}>Start{"\n"}Navigation</Text>
+                </Pressable>
+              </View>
             ))}
-          </ScrollView>
-        )}
-      </View>
-
-      {/* Arrival status */}
-      {selectedMeta && (
-        <Text style={arrived ? styles.arrived : styles.status}>
-          {arrived
-            ? `${selectedMeta.room} reached`
-            : distanceToTarget
-              ? `Heading to ${selectedMeta.room} (≈ ${(distanceToTarget * 100).toFixed(0)}% of map width away)`
-              : `Heading to ${selectedMeta.room}`}
-        </Text>
+          </View>
+        ))
       )}
-
-      {/* Status messages */}
-      {!bleReady && <Text style={styles.status}>Initializing Bluetooth…</Text>}
-      {error && <Text style={styles.error}>{error}</Text>}
-      {!error && Platform.OS === "android" && (
-        <Text style={styles.subtle}>
-          Use the dev client build (expo run:android) and scan the QR with your
-          phone — Expo Go cannot scan BLE beacons.
-        </Text>
-      )}
-    </View>
+    </ScrollView>
   );
 }
 
-/* ================================
-            STYLES
-================================ */
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 30,
+    backgroundColor: "#f7f0d7",
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 100,
+  },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#fff",
   },
   title: {
-    fontSize: 22,
-    fontWeight: "bold",
-    marginBottom: 20,
-  },
-  mapBox: {
-    width: MAP_WIDTH,
-    height: MAP_HEIGHT,
-    borderColor: "black",
-    borderWidth: 3,
-    borderRadius: 10,
-    position: "relative",
-    backgroundColor: "#fff",
-  },
-  beaconDot: {
-    width: 20,
-    height: 20,
-    backgroundColor: "red",
-    borderRadius: 10,
-    position: "absolute",
-  },
-  userDot: {
-    width: 20,
-    height: 20,
-    backgroundColor: "blue",
-    borderRadius: 10,
-    position: "absolute",
-  },
-  headingPointer: {
-    position: "absolute",
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 16,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "#66b3ff",
-  },
-  status: {
-    marginTop: 20,
-    color: "gray",
-  },
-  arrived: {
-    marginTop: 20,
-    color: "#007b55",
+    fontSize: 20,
     fontWeight: "700",
+    color: "#0b0b0b",
   },
-  error: {
-    marginTop: 20,
-    color: "red",
+  profileCircle: {
+    backgroundColor: "#f3d400",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  subtle: {
-    marginTop: 10,
-    color: "#666",
-    textAlign: "center",
-    paddingHorizontal: 20,
-  },
-  dropdownCard: {
+  scheduleBadge: {
     marginTop: 24,
-    width: MAP_WIDTH,
-    borderWidth: 3,
-    borderColor: "#1E90FF",
-    borderRadius: 12,
-    overflow: "hidden",
-    backgroundColor: "#f6fbff",
+    backgroundColor: "#2c3ea3",
+    paddingVertical: 12,
+    borderRadius: 16,
   },
-  dropdownToggle: {
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  dropdownLabel: {
-    fontSize: 18,
+  scheduleBadgeText: {
+    color: "#f3d400",
+    textAlign: "center",
     fontWeight: "700",
   },
-  dropdownList: {
-    maxHeight: 160,
-    borderTopWidth: 1,
-    borderTopColor: "#b6d7ff",
-  },
-  dropdownItem: {
-    paddingVertical: 12,
+  emptyCard: {
+    marginTop: 24,
+    backgroundColor: "#6f7fd4",
+    borderRadius: 16,
+    padding: 20,
     alignItems: "center",
   },
-  dropdownItemText: {
+  emptyText: {
+    color: "#fff",
     fontSize: 16,
-    color: "#1c4f82",
+    marginBottom: 12,
+  },
+  manualButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  manualButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  daySection: {
+    marginTop: 24,
+  },
+  dayTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  classCard: {
+    backgroundColor: "#6f7fd4",
+    borderRadius: 16,
+    padding: 16,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  classTitle: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 16,
+  },
+  classSubtitle: {
+    color: "#e7e7e7",
+  },
+  startButton: {
+    backgroundColor: "#f3d400",
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    gap: 4,
+  },
+  startButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+    textAlign: "center",
+    fontSize: 12,
   },
 });
