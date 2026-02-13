@@ -10,15 +10,14 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
    npm install
    ```
 
-2. Start the app on a physical Android phone
+2. Start the app on a physical Android phone with Expo Go
 
    ```bash
-   # one-time: build the development client so BLE works
-   npx expo run:android
-
-   # daily use: start the bundler and scan the QR with the dev client (not Expo Go)
-   npx expo start --dev-client
+   # start Metro and scan the QR code with Expo Go
+   npx expo start --tunnel
    ```
+
+   > Note: BLE scanning is disabled in Expo Go because it requires a custom native build.
 
 In the output, you'll find options to open the app in a
 
