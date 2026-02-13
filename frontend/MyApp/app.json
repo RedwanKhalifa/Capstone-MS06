@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "MyApp",
-    "slug": "MyApp",
+    "name": "Capstone Test",
+    "slug": "capstone-test",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -23,12 +23,9 @@
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
       ],
-      "package": "com.anonymous.MyApp"
+      "package": "com.anonymous.capstonetest"
     },
     "web": {
       "output": "static",
@@ -47,8 +44,7 @@
             "backgroundColor": "#000000"
           }
         }
-      ],
-      "react-native-ble-plx"
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
