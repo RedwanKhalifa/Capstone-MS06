@@ -63,6 +63,9 @@ export default function SettingsScreen() {
         <Text style={styles.rowText}>Units (Meter/steps)</Text>
         <Switch value={unitsEnabled} onValueChange={setUnitsEnabled} />
       </View>
+      <Pressable style={styles.menuButton} onPress={() => router.push("/positioning-setup")}>
+        <Text style={styles.menuButtonText}>Open Positioning Setup (Collect / Live / Plans)</Text>
+      </Pressable>
 
       <Text style={styles.sectionTitle}>Account</Text>
       <View style={styles.row}>
@@ -175,5 +178,17 @@ const styles = StyleSheet.create({
   dropdownText: {
     color: "#2c3ea3",
     marginBottom: 12,
+  },
+  menuButton: {
+    backgroundColor: "#2c3ea3",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 8,
+  },
+  menuButtonText: {
+    color: "#f3d400",
+    fontWeight: "700",
+    textAlign: "center",
   },
 });
