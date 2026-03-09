@@ -117,7 +117,10 @@ export default function HomeScreen() {
                 <Text style={styles.detailButtonText}>Outdoor</Text>
               </Pressable>
               {selectedRoom && (
-                <Pressable style={styles.detailButtonSecondary} onPress={() => router.push("/indoor")}>
+                <Pressable
+                  style={styles.detailButtonSecondary}
+                  onPress={() => router.push({ pathname: "/indoor", params: { destination: selectedRoom } })}
+                >
                   <Text style={styles.detailButtonText}>Indoor</Text>
                 </Pressable>
               )}
