@@ -1,4 +1,7 @@
+import { loadPoints, savePoints } from "@/lib/storage";
+import type { PlanID } from "@/types/fingerprint";
 import * as FileSystem from "expo-file-system/legacy";
+
 export type PositioningPoint = { id: string; name: string; x: number; y: number };
 type PositioningState = { lastKnownPosition: { x: number; y: number }; points: PositioningPoint[]; planName: string };
 const FILE_URI = `${FileSystem.documentDirectory}positioning-state.json`;
@@ -7,6 +10,22 @@ async function loadState(): Promise<PositioningState> { try { const info = await
 async function saveState(state: PositioningState) { await FileSystem.writeAsStringAsync(FILE_URI, JSON.stringify(state)); }
 export async function getLivePosition() { return (await loadState()).lastKnownPosition; }
 export async function setLivePosition(x: number, y: number) { const state = await loadState(); await saveState({ ...state, lastKnownPosition: { x, y } }); }
-export async function getSetupState() { return loadState(); }
-export async function addCollectPoint(name: string, x: number, y: number) { const state = await loadState(); const next = { ...state, points: [...state.points, { id: `${Date.now()}`, name, x, y }], lastKnownPosition: { x, y } }; await saveState(next); return next; }
+export async function getSetupState() {
+	const state = await loadState();
+	const anchorPoints = await loadPoints();
+	const mappedPoints = anchorPoints
+		.filter((p) => p.planID === (state.planName as PlanID))
+		.map((p) => ({ id: p.id, name: p.name, x: p.xNorm, y: p.yNorm }));
+	return { ...state, points: mappedPoints };
+}
+export async function addCollectPoint(name: string, x: number, y: number) {
+	const state = await loadState();
+	const currentPlan = (state.planName as PlanID) || "ENG4_NORTH";
+	const existing = await loadPoints();
+	const nextPoint = { id: `${Date.now()}`, planID: currentPlan, name, xNorm: x, yNorm: y };
+	await savePoints([...existing, nextPoint]);
+	const next = { ...state, points: [...state.points, { id: nextPoint.id, name, x, y }], lastKnownPosition: { x, y } };
+	await saveState(next);
+	return next;
+}
 export async function setPlanName(planName: string) { const state = await loadState(); const next = { ...state, planName }; await saveState(next); return next; }
