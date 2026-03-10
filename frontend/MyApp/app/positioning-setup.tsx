@@ -8,7 +8,7 @@ import { buildDataset, exportRowsCsv, importCsvText, parseCsvRows } from '@/lib/
 import { buildKnnCache, regressKnn } from '@/lib/knn';
 import { requestBlePermissions } from '@/lib/permissions';
 import { loadDataset, loadPoints, saveDataset, savePoints } from '@/lib/storage';
-import { setLivePosition, setPlanName } from '@/services/positioning-adapter';
+import { setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
 import { BEACON_UUID_DEFAULT, FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
@@ -28,6 +28,7 @@ export default function PositioningSetupScreen() {
   const selectedPlanID: PlanID = 'ENG4_NORTH';
   const [points, setPoints] = useState<AnchorPoint[]>([]);
   const [dataset, setDataset] = useState<TrainingDataset>({ beaconKeys: [], samples: [], rows: [] });
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [uuid, setUuid] = useState(BEACON_UUID_DEFAULT);
@@ -36,25 +37,36 @@ export default function PositioningSetupScreen() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [medians, setMedians] = useState<Record<string, number>>({});
   const [runningLive, setRunningLive] = useState(false);
-  const [prediction, setPrediction] = useState<{ x: number; y: number; confidence: number } | null>(null);
+  const [prediction, setPrediction] = useState<LivePosition | null>(null);
+  const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
 
   const buffers = useRef<Record<string, number[]>>({});
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevRef = useRef<{ x: number; y: number } | null>(null);
-  const { beacons, isScanning, start, stop, clear } = useBeaconRanger(uuid);
+  const { beacons, isScanning, scanError, start, stop, clear } = useBeaconRanger(uuid);
 
   useEffect(() => {
-    loadPoints().then(setPoints);
-    loadDataset().then(setDataset);
+    let mounted = true;
+    Promise.all([loadPoints(), loadDataset()]).then(([storedPoints, storedDataset]) => {
+      if (!mounted) return;
+      setPoints(storedPoints);
+      setDataset(storedDataset);
+      setIsHydrated(true);
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
+    if (!isHydrated) return;
     savePoints(points);
-  }, [points]);
+  }, [points, isHydrated]);
 
   useEffect(() => {
+    if (!isHydrated) return;
     saveDataset(dataset);
-  }, [dataset]);
+  }, [dataset, isHydrated]);
 
   useEffect(() => {
     setPlanName(selectedPlanID);
@@ -63,17 +75,23 @@ export default function PositioningSetupScreen() {
   const selectedPlan = FLOOR_PLANS.find((p) => p.id === selectedPlanID)!;
   const planPoints = useMemo(() => points.filter((p) => p.planID === selectedPlanID), [points, selectedPlanID]);
   const selectedPoint = planPoints.find((p) => p.id === selectedPointId) ?? null;
-
   const cache = useMemo(() => buildKnnCache(dataset, selectedPlanID), [dataset, selectedPlanID]);
 
   useEffect(() => {
     if (!runningLive || !cache) return;
     const next = regressKnn(cache, beacons, prevRef.current, 5, 0.2);
     if (!next) return;
+
     prevRef.current = { x: next.x, y: next.y };
-    setPrediction(next);
-    setLivePosition(next.x, next.y);
-  }, [beacons, cache, runningLive]);
+    setPrediction({
+      x: next.x,
+      y: next.y,
+      timestamp: Date.now(),
+      planId: selectedPlanID,
+    });
+    setLiveConfidence(next.confidence);
+    void setLivePosition(next.x, next.y, { timestamp: Date.now(), planId: selectedPlanID });
+  }, [beacons, cache, runningLive, selectedPlanID]);
 
   const beginCapture = () => {
     if (!selectedPoint) {
@@ -192,11 +210,26 @@ export default function PositioningSetupScreen() {
   };
 
   const handleLiveStart = async () => {
-    await requestBlePermissions();
+    const granted = await requestBlePermissions();
+    if (!granted) {
+      Alert.alert('Permissions required', 'Bluetooth and Location permissions are required to scan beacons.');
+      return;
+    }
     prevRef.current = null;
     setPrediction(null);
+    clear();
     start();
     setRunningLive(true);
+  };
+
+  const handleCollectStart = async () => {
+    const granted = await requestBlePermissions();
+    if (!granted) {
+      Alert.alert('Permissions required', 'Bluetooth and Location permissions are required to scan beacons.');
+      return;
+    }
+    clear();
+    start();
   };
 
   const handleLiveStop = () => {
@@ -223,10 +256,13 @@ export default function PositioningSetupScreen() {
       <Text style={styles.hint}>Perm requests Android BLE/location runtime permissions (Scan/Connect/Fine Location).</Text>
       <View style={styles.rowWrap}>
         <Pressable style={styles.btn} onPress={requestBlePermissions}><Text style={styles.btnText}>Perm</Text></Pressable>
-        <Pressable style={styles.btn} onPress={start} disabled={isScanning}><Text style={styles.btnText}>Start ranging</Text></Pressable>
+        <Pressable style={styles.btn} onPress={handleCollectStart} disabled={isScanning}><Text style={styles.btnText}>Start ranging</Text></Pressable>
         <Pressable style={styles.btnOutline} onPress={stop}><Text>Stop</Text></Pressable>
         <Pressable style={styles.btnOutline} onPress={clear}><Text>Clear live</Text></Pressable>
       </View>
+      <Text>{isScanning ? `Scanning… Beacons found: ${beacons.length}` : 'Scanner stopped'}</Text>
+      {scanError ? <Text style={styles.errorText}>Scan error: {scanError}</Text> : null}
+      {isScanning && beacons.length === 0 ? <Text style={styles.hint}>If none appear, verify beacon power and UUID filter.</Text> : null}
 
       <View style={styles.rowWrap}>
         <TextInput style={[styles.input, styles.smallInput]} value={captureWindow} onChangeText={setCaptureWindow} keyboardType="numeric" />
@@ -266,10 +302,12 @@ export default function PositioningSetupScreen() {
         <Pressable style={styles.btn} onPress={handleLiveStart}><Text style={styles.btnText}>Start</Text></Pressable>
         <Pressable style={styles.btnOutline} onPress={handleLiveStop}><Text>Stop</Text></Pressable>
       </View>
+      <Text>{isScanning ? `Scanning… Beacons found: ${beacons.length}` : 'Scanner stopped'}</Text>
+      {scanError ? <Text style={styles.errorText}>Scan error: {scanError}</Text> : null}
 
       <Text>
         {prediction
-          ? `x=${prediction.x.toFixed(3)} y=${prediction.y.toFixed(3)} confidence=${(prediction.confidence * 100).toFixed(1)}%`
+          ? `x=${prediction.x.toFixed(3)} y=${prediction.y.toFixed(3)} confidence=${liveConfidence != null ? `${(liveConfidence * 100).toFixed(1)}%` : 'N/A'}`
           : 'No prediction yet'}
       </Text>
       <Text>Plan training samples: {dataset.samples.filter((s) => s.planID === selectedPlanID).length}</Text>
@@ -370,6 +408,7 @@ const styles = StyleSheet.create({
   btnOutline: { borderWidth: 1, borderColor: '#2c3ea3', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12, backgroundColor: '#fff' },
   btnDanger: { backgroundColor: '#b91c1c', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12 },
   hint: { color: '#475569' },
+  errorText: { color: '#b91c1c', fontWeight: '600' },
   pointRow: {
     backgroundColor: '#fff',
     borderWidth: 1,

@@ -1,16 +1,16 @@
+import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
-  Image,
-  ImageBackground,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  Linking,
+    Image,
+    ImageBackground,
+    Linking,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
-import { useRouter } from "expo-router";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
@@ -135,11 +135,11 @@ export default function HomeScreen() {
           <View style={styles.resultsCard}>
             <Text style={styles.resultsTitle}>{searchQuery ? "Results" : "Recent"}</Text>
             <ScrollView style={styles.resultsList}>
-              {filteredResults.map((item) => {
+              {filteredResults.map((item, index) => {
                 const displayKey = item.includes(" - ") ? item.split(" - ")[0] : item;
                 return (
                   <Pressable
-                    key={item}
+                    key={`${item}-${index}`}
                     style={styles.resultItem}
                     onPress={() => handleSelectSearch(item)}
                   >
