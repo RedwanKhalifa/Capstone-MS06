@@ -8,7 +8,7 @@ import { buildDataset, exportRowsCsv, importCsvText, parseCsvRows } from '@/lib/
 import { buildKnnCache, regressKnn } from '@/lib/knn';
 import { requestBlePermissions } from '@/lib/permissions';
 import { loadDataset, loadPoints, saveDataset, savePoints } from '@/lib/storage';
-import { setLivePosition, setPlanName } from '@/services/positioning-adapter';
+import { setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
 import { BEACON_UUID_DEFAULT, FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
@@ -37,7 +37,8 @@ export default function PositioningSetupScreen() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [medians, setMedians] = useState<Record<string, number>>({});
   const [runningLive, setRunningLive] = useState(false);
-  const [prediction, setPrediction] = useState<{ x: number; y: number; confidence: number } | null>(null);
+  const [prediction, setPrediction] = useState<LivePosition | null>(null);
+  const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
 
   const buffers = useRef<Record<string, number[]>>({});
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,17 +75,23 @@ export default function PositioningSetupScreen() {
   const selectedPlan = FLOOR_PLANS.find((p) => p.id === selectedPlanID)!;
   const planPoints = useMemo(() => points.filter((p) => p.planID === selectedPlanID), [points, selectedPlanID]);
   const selectedPoint = planPoints.find((p) => p.id === selectedPointId) ?? null;
-
   const cache = useMemo(() => buildKnnCache(dataset, selectedPlanID), [dataset, selectedPlanID]);
 
   useEffect(() => {
     if (!runningLive || !cache) return;
     const next = regressKnn(cache, beacons, prevRef.current, 5, 0.2);
     if (!next) return;
+
     prevRef.current = { x: next.x, y: next.y };
-    setPrediction(next);
-    setLivePosition(next.x, next.y);
-  }, [beacons, cache, runningLive]);
+    setPrediction({
+      x: next.x,
+      y: next.y,
+      timestamp: Date.now(),
+      planId: selectedPlanID,
+    });
+    setLiveConfidence(next.confidence);
+    void setLivePosition(next.x, next.y, { timestamp: Date.now(), planId: selectedPlanID });
+  }, [beacons, cache, runningLive, selectedPlanID]);
 
   const beginCapture = () => {
     if (!selectedPoint) {
@@ -300,7 +307,7 @@ export default function PositioningSetupScreen() {
 
       <Text>
         {prediction
-          ? `x=${prediction.x.toFixed(3)} y=${prediction.y.toFixed(3)} confidence=${(prediction.confidence * 100).toFixed(1)}%`
+          ? `x=${prediction.x.toFixed(3)} y=${prediction.y.toFixed(3)} confidence=${liveConfidence != null ? `${(liveConfidence * 100).toFixed(1)}%` : 'N/A'}`
           : 'No prediction yet'}
       </Text>
       <Text>Plan training samples: {dataset.samples.filter((s) => s.planID === selectedPlanID).length}</Text>

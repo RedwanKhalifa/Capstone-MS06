@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { NavigationVisual } from "@/components/indoor-navigation/navigation-visual";
-import { subscribeLivePosition } from "@/services/positioning-adapter";
+import { subscribeLivePosition, type LivePosition } from "@/services/positioning-adapter";
 import { getRouteForDestination, type RoutePoint } from "@/services/routing-adapter";
 
 export default function IndoorNavigationScreen() {
@@ -12,7 +12,12 @@ export default function IndoorNavigationScreen() {
   const destination = useMemo(() => params.destination ?? "ENG", [params.destination]);
 
   const [route, setRoute] = useState<RoutePoint[]>([]);
-  const [currentPosition, setCurrentPosition] = useState({ x: 0.82, y: 0.42 });
+  const [currentPosition, setCurrentPosition] = useState<LivePosition>({
+    x: 0.82,
+    y: 0.42,
+    timestamp: Date.now(),
+    planId: "ENG4_NORTH",
+  });
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,6 +48,9 @@ export default function IndoorNavigationScreen() {
         <Text style={styles.metaTitle}>Live Position</Text>
         <Text>X: {currentPosition.x.toFixed(3)}</Text>
         <Text>Y: {currentPosition.y.toFixed(3)}</Text>
+        <Text>Last update: {new Date(currentPosition.timestamp).toLocaleTimeString()}</Text>
+        <Text>Plan: {currentPosition.planId ?? "ENG4_NORTH"}</Text>
+        <Text>Accuracy: {typeof currentPosition.accuracy === "number" ? `${currentPosition.accuracy.toFixed(2)} m` : "N/A"}</Text>
       </View>
     </ScrollView>
   );
