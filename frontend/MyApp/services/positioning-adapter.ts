@@ -2,14 +2,36 @@ import { loadPoints, savePoints } from "@/lib/storage";
 import type { PlanID } from "@/types/fingerprint";
 import * as FileSystem from "expo-file-system/legacy";
 
+export type LivePosition = { x: number; y: number };
 export type PositioningPoint = { id: string; name: string; x: number; y: number };
-type PositioningState = { lastKnownPosition: { x: number; y: number }; points: PositioningPoint[]; planName: string };
+type PositioningState = { lastKnownPosition: LivePosition; points: PositioningPoint[]; planName: string };
 const FILE_URI = `${FileSystem.documentDirectory}positioning-state.json`;
 const DEFAULT_STATE: PositioningState = { lastKnownPosition: { x: 0.82, y: 0.42 }, points: [], planName: "ENG4_NORTH" };
 async function loadState(): Promise<PositioningState> { try { const info = await FileSystem.getInfoAsync(FILE_URI); if (!info.exists) return DEFAULT_STATE; const text = await FileSystem.readAsStringAsync(FILE_URI); return { ...DEFAULT_STATE, ...(JSON.parse(text) as Partial<PositioningState>) }; } catch { return DEFAULT_STATE; } }
 async function saveState(state: PositioningState) { await FileSystem.writeAsStringAsync(FILE_URI, JSON.stringify(state)); }
 export async function getLivePosition() { return (await loadState()).lastKnownPosition; }
 export async function setLivePosition(x: number, y: number) { const state = await loadState(); await saveState({ ...state, lastKnownPosition: { x, y } }); }
+export function subscribeLivePosition(onUpdate: (position: LivePosition) => void, intervalMs = 700) {
+	let active = true;
+	const pollMs = Math.max(250, intervalMs);
+
+	const tick = async () => {
+		try {
+			const position = await getLivePosition();
+			if (active) onUpdate(position);
+		} catch {}
+	};
+
+	void tick();
+	const timer = setInterval(() => {
+		void tick();
+	}, pollMs);
+
+	return () => {
+		active = false;
+		clearInterval(timer);
+	};
+}
 export async function getSetupState() {
 	const state = await loadState();
 	const anchorPoints = await loadPoints();

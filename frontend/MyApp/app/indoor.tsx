@@ -1,9 +1,9 @@
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { NavigationVisual } from "@/components/indoor-navigation/navigation-visual";
-import { getLivePosition } from "@/services/positioning-adapter";
+import { subscribeLivePosition } from "@/services/positioning-adapter";
 import { getRouteForDestination, type RoutePoint } from "@/services/routing-adapter";
 
 export default function IndoorNavigationScreen() {
@@ -20,12 +20,12 @@ export default function IndoorNavigationScreen() {
     getRouteForDestination(destination)
       .then(setRoute)
       .catch(() => setError("Route unavailable. Showing fallback state."));
-
-    getLivePosition().then(setCurrentPosition).catch(() => {
-      // Safe fallback if positioning setup isn't done yet.
-      setCurrentPosition({ x: 0.82, y: 0.42 });
-    });
   }, [destination]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeLivePosition(setCurrentPosition, 700);
+    return unsubscribe;
+  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

@@ -30,6 +30,7 @@ export const useBeaconRanger = (uuidFilter: string) => {
   const manager = useMemo(() => new BleManager(), []);
   const [beacons, setBeacons] = useState<Record<string, BeaconReading>>({});
   const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   useEffect(() => () => manager.destroy(), [manager]);
 
@@ -48,9 +49,11 @@ export const useBeaconRanger = (uuidFilter: string) => {
   );
 
   const start = useCallback(async () => {
+    setScanError(null);
     setIsScanning(true);
     manager.startDeviceScan(null, { allowDuplicates: true }, (error, d) => {
       if (error) {
+        setScanError(error.message || 'Failed to start BLE scan');
         setIsScanning(false);
         return;
       }
@@ -68,6 +71,7 @@ export const useBeaconRanger = (uuidFilter: string) => {
   return {
     beacons: Object.values(beacons).sort((a, b) => a.key.localeCompare(b.key)),
     isScanning,
+    scanError,
     start,
     stop,
     clear,
