@@ -12,6 +12,7 @@ import { setLivePosition, setPlanName, type LivePosition } from '@/services/posi
 import { BEACON_UUID_DEFAULT, FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
+const LIVE_INFERENCE_INTERVAL_MS = 1000;
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -39,11 +40,14 @@ export default function PositioningSetupScreen() {
   const [runningLive, setRunningLive] = useState(false);
   const [prediction, setPrediction] = useState<LivePosition | null>(null);
   const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
+  const { beacons, isScanning, scanError, start, stop, clear } = useBeaconRanger(uuid);
 
   const buffers = useRef<Record<string, number[]>>({});
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevRef = useRef<{ x: number; y: number } | null>(null);
-  const { beacons, isScanning, scanError, start, stop, clear } = useBeaconRanger(uuid);
+  const latestBeaconsRef = useRef(beacons);
+  const latestCacheRef = useRef<ReturnType<typeof buildKnnCache> | null>(null);
+  const latestPlanIdRef = useRef<PlanID>(selectedPlanID);
 
   useEffect(() => {
     let mounted = true;
@@ -78,20 +82,45 @@ export default function PositioningSetupScreen() {
   const cache = useMemo(() => buildKnnCache(dataset, selectedPlanID), [dataset, selectedPlanID]);
 
   useEffect(() => {
-    if (!runningLive || !cache) return;
-    const next = regressKnn(cache, beacons, prevRef.current, 5, 0.2);
-    if (!next) return;
+    latestBeaconsRef.current = beacons;
+  }, [beacons]);
 
-    prevRef.current = { x: next.x, y: next.y };
-    setPrediction({
-      x: next.x,
-      y: next.y,
-      timestamp: Date.now(),
-      planId: selectedPlanID,
-    });
-    setLiveConfidence(next.confidence);
-    void setLivePosition(next.x, next.y, { timestamp: Date.now(), planId: selectedPlanID });
-  }, [beacons, cache, runningLive, selectedPlanID]);
+  useEffect(() => {
+    latestCacheRef.current = cache;
+  }, [cache]);
+
+  useEffect(() => {
+    latestPlanIdRef.current = selectedPlanID;
+  }, [selectedPlanID]);
+
+  useEffect(() => {
+    if (!runningLive) return;
+
+    const tick = () => {
+      const latestCache = latestCacheRef.current;
+      if (!latestCache) return;
+
+      const next = regressKnn(latestCache, latestBeaconsRef.current, prevRef.current, 5, 0.2);
+      if (!next) return;
+
+      const now = Date.now();
+      const planId = latestPlanIdRef.current;
+
+      prevRef.current = { x: next.x, y: next.y };
+      setPrediction({
+        x: next.x,
+        y: next.y,
+        timestamp: now,
+        planId,
+      });
+      setLiveConfidence(next.confidence);
+      void setLivePosition(next.x, next.y, { timestamp: now, planId });
+    };
+
+    tick();
+    const interval = setInterval(tick, LIVE_INFERENCE_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [runningLive]);
 
   const beginCapture = () => {
     if (!selectedPoint) {

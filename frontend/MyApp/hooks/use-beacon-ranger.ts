@@ -5,6 +5,8 @@ import { BleManager, type Device } from 'react-native-ble-plx';
 import { BEACON_UUID_DEFAULT, type BeaconReading } from '@/types/fingerprint';
 
 const IBEACON_PREFIX = '4c000215';
+const OFFLINE_TIMEOUT_MS = 3000;
+const LAST_SEEN_HEARTBEAT_MS = 500;
 
 const toHex = (value: string) => Buffer.from(value, 'base64').toString('hex').toLowerCase();
 const normalizeUuid = (value: string) => value.trim().toLowerCase();
@@ -38,6 +40,28 @@ export const useBeaconRanger = (uuidFilter: string) => {
     };
   }, [manager]);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const cutoff = Date.now() - OFFLINE_TIMEOUT_MS;
+      setBeacons((prev) => {
+        let changed = false;
+        const next: Record<string, BeaconReading> = {};
+
+        Object.entries(prev).forEach(([key, reading]) => {
+          if (reading.lastSeen >= cutoff) {
+            next[key] = reading;
+          } else {
+            changed = true;
+          }
+        });
+
+        return changed ? next : prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
   const upsert = useCallback(
     (device: Device) => {
       const parsed = parseIBeacon(device);
@@ -46,10 +70,16 @@ export const useBeaconRanger = (uuidFilter: string) => {
       const requiredUuid = normalizeUuid(uuidFilter || BEACON_UUID_DEFAULT);
       if (normalizeUuid(parsed.uuid) !== requiredUuid) return;
 
-      const reading: BeaconReading = { ...parsed, rssi: device.rssi, lastSeen: Date.now() };
+      const now = Date.now();
+      const reading: BeaconReading = { ...parsed, rssi: device.rssi, lastSeen: now };
       setBeacons((prev) => {
         const existing = prev[reading.key];
-        if (existing && existing.rssi === reading.rssi && existing.uuid === reading.uuid) {
+        if (
+          existing &&
+          existing.rssi === reading.rssi &&
+          existing.uuid === reading.uuid &&
+          now - existing.lastSeen < LAST_SEEN_HEARTBEAT_MS
+        ) {
           return prev;
         }
         return { ...prev, [reading.key]: reading };
