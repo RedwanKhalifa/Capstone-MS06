@@ -311,11 +311,267 @@ function BuildingScene({
   );
 }
 
+function NavigatorScene({
+  routePoints,
+  currentPoint,
+  activeFloorId,
+  destinationRoom,
+  startRoom,
+  hasArrived,
+  estimatedMinutes,
+}: {
+  routePoints: { x: number; y: number; floorId: DemoFloorId }[];
+  currentPoint?: { x: number; y: number; floorId: DemoFloorId };
+  activeFloorId: DemoFloorId;
+  destinationRoom: DemoRoom;
+  startRoom: DemoRoom;
+  hasArrived: boolean;
+  estimatedMinutes: number;
+}) {
+  const routeOnFloor = routePoints.filter((point) => point.floorId === activeFloorId);
+  const currentInstruction = hasArrived
+    ? `Arrive at ${destinationRoom.label}`
+    : activeFloorId === destinationRoom.floorId
+      ? `Continue to ${destinationRoom.label}`
+      : `Head to main stairs from ${startRoom.label}`;
+  const guideRooms = DEMO_ROOMS
+    .filter((room) => room.floorId === activeFloorId)
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  const focusPoint = currentPoint?.floorId === activeFloorId
+    ? currentPoint
+    : routeOnFloor[Math.max(routeOnFloor.length - 2, 0)] ?? { x: 50, y: 52, floorId: activeFloorId };
+  const routeDirection = routeOnFloor.length > 1
+    ? {
+        x: routeOnFloor[routeOnFloor.length - 1].x - focusPoint.x,
+        y: routeOnFloor[routeOnFloor.length - 1].y - focusPoint.y,
+      }
+    : { x: 0, y: -1 };
+  const directionLength = Math.max(0.001, Math.hypot(routeDirection.x, routeDirection.y));
+  const forward = {
+    x: routeDirection.x / directionLength,
+    y: routeDirection.y / directionLength,
+  };
+  const right = {
+    x: forward.y,
+    y: -forward.x,
+  };
+  const cameraScale = 5.8;
+  const projectGuide = (x: number, y: number, z: number) => {
+    const dx = x - focusPoint.x;
+    const dy = y - focusPoint.y;
+    const localX = dx * right.x + dy * right.y;
+    const localY = dx * forward.x + dy * forward.y;
+
+    return {
+      x: 180 + localX * 8.6,
+      y: 318 - localY * cameraScale - z * 1.65,
+    };
+  };
+  const extrudeGuideBox = (
+    x: number,
+    y: number,
+    width: number,
+    depth: number,
+    bottomZ: number,
+    height: number
+  ) => {
+    const frontLeftBottom = projectGuide(x, y + depth, bottomZ);
+    const frontRightBottom = projectGuide(x + width, y + depth, bottomZ);
+    const backRightBottom = projectGuide(x + width, y, bottomZ);
+    const backLeftBottom = projectGuide(x, y, bottomZ);
+
+    const frontLeftTop = projectGuide(x, y + depth, bottomZ + height);
+    const frontRightTop = projectGuide(x + width, y + depth, bottomZ + height);
+    const backRightTop = projectGuide(x + width, y, bottomZ + height);
+    const backLeftTop = projectGuide(x, y, bottomZ + height);
+
+    return {
+      top: [frontLeftTop, frontRightTop, backRightTop, backLeftTop],
+      left: [frontLeftBottom, frontLeftTop, backLeftTop, backLeftBottom],
+      right: [frontRightBottom, frontRightTop, backRightTop, backRightBottom],
+    };
+  };
+  const guideRoute = routeOnFloor
+    .map((point) => {
+      const projected = projectGuide(point.x, point.y, levelZ(activeFloorId) + ROOM_HEIGHT + 2);
+      return `${projected.x},${projected.y}`;
+    })
+    .join(" ");
+  const visibleGuideRooms = guideRooms.filter((room) => {
+    const centerX = room.x + room.width / 2;
+    const centerY = room.y + room.height / 2;
+    const dx = centerX - focusPoint.x;
+    const dy = centerY - focusPoint.y;
+    const localX = dx * right.x + dy * right.y;
+    const localY = dx * forward.x + dy * forward.y;
+
+    return Math.abs(localX) < 34 && localY > -12 && localY < 52;
+  });
+  const guideRoomsAdjusted = visibleGuideRooms
+    .map((room) => {
+      const centerX = room.x + room.width / 2;
+      const centerY = room.y + room.height / 2;
+      const dx = centerX - focusPoint.x;
+      const dy = centerY - focusPoint.y;
+      const localX = dx * right.x + dy * right.y;
+      const localY = dx * forward.x + dy * forward.y;
+
+      return {
+        ...room,
+        laneSideX: localX < 0 ? 26 : 60,
+        laneDepthY: 14 + Math.max(0, Math.min(42, localY)),
+        laneWidth: Math.max(12, Math.min(16, room.width - 2)),
+        laneHeight: Math.max(10, Math.min(14, room.height)),
+        localX,
+      };
+    })
+    .sort((a, b) => a.laneDepthY - b.laneDepthY);
+  return (
+    <View style={styles.navigatorShell}>
+      <View style={styles.navigatorHeader}>
+        <Text style={styles.navigatorDistance}>{estimatedMinutes} min</Text>
+        <Text style={styles.navigatorInstruction}>{currentInstruction}</Text>
+        <View style={styles.navigatorExitPill}>
+          <Text style={styles.navigatorExitText}>{getFloorMeta(activeFloorId).label}</Text>
+        </View>
+      </View>
+
+      <View style={styles.navigatorMapCard}>
+        <Svg viewBox="0 0 360 420" style={styles.navigatorOverlay}>
+          <Rect x={0} y={0} width={360} height={420} fill="#e7ecf3" />
+          <Rect x={0} y={0} width={360} height={170} fill="#f7f9fc" />
+
+          <Polygon
+            points={polygonString([
+              projectGuide(-8, 6, levelZ(activeFloorId) - 2),
+              projectGuide(108, 6, levelZ(activeFloorId) - 2),
+              projectGuide(108, 84, levelZ(activeFloorId) - 2),
+              projectGuide(-8, 84, levelZ(activeFloorId) - 2),
+            ])}
+            fill="#dde5f2"
+          />
+
+          <Polygon
+            points={polygonString([
+              projectGuide(40, 2, levelZ(activeFloorId)),
+              projectGuide(60, 2, levelZ(activeFloorId)),
+              projectGuide(60, 92, levelZ(activeFloorId)),
+              projectGuide(40, 92, levelZ(activeFloorId)),
+            ])}
+            fill="#d4dbe7"
+          />
+
+          {guideRoomsAdjusted.map((room) => {
+            const bottomZ = levelZ(room.floorId);
+            const block = extrudeGuideBox(
+              room.laneSideX,
+              room.laneDepthY,
+              room.laneWidth,
+              room.laneHeight,
+              bottomZ,
+              ROOM_HEIGHT + 2
+            );
+            const isStart = room.id === NAVIGATION_START_ROOM_ID;
+            const isDestination = room.id === destinationRoom.id;
+            const roofColor = isDestination ? "#ffd166" : isStart ? "#c4f1df" : shadeHex(room.color, 18);
+            const leftColor = shadeHex(room.color, -14);
+            const rightColor = shadeHex(room.color, -32);
+            const labelPoint = projectGuide(
+              room.laneSideX + room.laneWidth / 2,
+              room.laneDepthY + room.laneHeight / 2,
+              bottomZ + ROOM_HEIGHT + 5
+            );
+
+            return (
+              <React.Fragment key={`guide-${room.id}`}>
+                <Polygon points={polygonString(block.left)} fill={leftColor} opacity={0.96} />
+                <Polygon points={polygonString(block.right)} fill={rightColor} opacity={0.96} />
+                <Polygon points={polygonString(block.top)} fill={roofColor} stroke="#2f3f70" strokeWidth={1} opacity={0.98} />
+                {(isStart || isDestination || Math.abs(room.localX) < 24) && (
+                  <SvgText
+                    x={labelPoint.x}
+                    y={labelPoint.y}
+                    fontSize={8.2}
+                    fontWeight="700"
+                    fill="#13244d"
+                    textAnchor="middle"
+                  >
+                    {room.label}
+                  </SvgText>
+                )}
+              </React.Fragment>
+            );
+          })}
+
+          {routeOnFloor.length > 1 && (
+            <Polyline
+              points={guideRoute}
+              fill="none"
+              stroke="#2563eb"
+              strokeWidth={5.4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          )}
+
+          {routeOnFloor[0] && (() => {
+            const start = routeOnFloor[0];
+            const projected = projectGuide(start.x, start.y, levelZ(activeFloorId) + ROOM_HEIGHT + 2);
+            return <Circle cx={projected.x} cy={projected.y} r={5.2} fill="#10b981" stroke="#ffffff" strokeWidth={1.8} />;
+          })()}
+
+          {routeOnFloor[routeOnFloor.length - 1] && (() => {
+            const end = routeOnFloor[routeOnFloor.length - 1];
+            const projected = projectGuide(end.x, end.y, levelZ(activeFloorId) + ROOM_HEIGHT + 2);
+            return <Circle cx={projected.x} cy={projected.y} r={5.6} fill="#f59e0b" stroke="#ffffff" strokeWidth={2} />;
+          })()}
+
+          {currentPoint?.floorId === activeFloorId && (() => {
+            const projected = projectGuide(
+              currentPoint.x,
+              currentPoint.y,
+              levelZ(activeFloorId) + ROOM_HEIGHT + 3.6
+            );
+            return (
+              <>
+                <Circle cx={projected.x} cy={projected.y} r={9} fill="rgba(37,99,235,0.16)" />
+                <Circle cx={projected.x} cy={projected.y} r={5.2} fill="#ef4444" stroke="#ffffff" strokeWidth={2.2} />
+              </>
+            );
+          })()}
+
+          <SvgText x={24} y={88} fontSize={12} fontWeight="700" fill="#66758e">
+            Third-Person Indoor Guide
+          </SvgText>
+          <SvgText x={24} y={104} fontSize={11} fill="#7b889e">
+            {getFloorMeta(activeFloorId).label}
+          </SvgText>
+        </Svg>
+      </View>
+
+      <View style={styles.navigatorFooter}>
+        <View style={styles.navigatorMetric}>
+          <Text style={styles.navigatorMetricValue}>{destinationRoom.label}</Text>
+          <Text style={styles.navigatorMetricLabel}>destination</Text>
+        </View>
+        <View style={styles.navigatorMetric}>
+          <Text style={styles.navigatorMetricValue}>{estimatedMinutes}</Text>
+          <Text style={styles.navigatorMetricLabel}>min</Text>
+        </View>
+        <View style={styles.navigatorMetric}>
+          <Text style={styles.navigatorMetricValue}>{getFloorMeta(activeFloorId).shortLabel}</Text>
+          <Text style={styles.navigatorMetricLabel}>floor</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function NavigationScreen() {
   const [destinationId, setDestinationId] = useState("ENG201");
   const [frameIndex, setFrameIndex] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-  const [viewMode, setViewMode] = useState<"stack" | "single">("stack");
+  const [viewMode, setViewMode] = useState<"stack" | "single" | "guide">("stack");
   const [selectedFloorId, setSelectedFloorId] = useState<DemoFloorId>("1");
 
   const route = useMemo(() => getNavigationDemoRoute(destinationId), [destinationId]);
@@ -524,6 +780,14 @@ export default function NavigationScreen() {
               Single floor
             </Text>
           </Pressable>
+          <Pressable
+            style={[styles.modeButton, viewMode === "guide" && styles.modeButtonActive]}
+            onPress={() => setViewMode("guide")}
+          >
+            <Text style={[styles.modeButtonText, viewMode === "guide" && styles.modeButtonTextActive]}>
+              Navigate
+            </Text>
+          </Pressable>
         </View>
 
         {viewMode === "single" && (
@@ -561,15 +825,29 @@ export default function NavigationScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>3D navigation scene</Text>
-        <BuildingScene
-          destinationId={destinationId}
-          routePoints={routePoints}
-          currentPoint={currentPoint}
-          activeFloorId={activeFloorId}
-          floorsOnRoute={route.floorsOnRoute}
-          isolatedFloorId={visibleFloorId}
-        />
+        <Text style={styles.sectionTitle}>
+          {viewMode === "guide" ? "Guidance view" : "3D navigation scene"}
+        </Text>
+        {viewMode === "guide" ? (
+          <NavigatorScene
+            routePoints={routePoints}
+            currentPoint={currentPoint}
+            activeFloorId={activeFloorId}
+            destinationRoom={destinationRoom}
+            startRoom={startRoom}
+            hasArrived={hasArrived}
+            estimatedMinutes={estimatedMinutes}
+          />
+        ) : (
+          <BuildingScene
+            destinationId={destinationId}
+            routePoints={routePoints}
+            currentPoint={currentPoint}
+            activeFloorId={activeFloorId}
+            floorsOnRoute={route.floorsOnRoute}
+            isolatedFloorId={visibleFloorId}
+          />
+        )}
       </View>
 
       <View style={styles.section}>
@@ -856,9 +1134,10 @@ const styles = StyleSheet.create({
   modeRow: {
     flexDirection: "row",
     gap: 10,
+    flexWrap: "wrap",
   },
   modeButton: {
-    flex: 1,
+    minWidth: 96,
     borderRadius: 16,
     backgroundColor: "#ffffff",
     paddingVertical: 12,
@@ -925,6 +1204,73 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: "#5f6d86",
     lineHeight: 20,
+  },
+  navigatorShell: {
+    backgroundColor: "#0f172a",
+    borderRadius: 28,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#1e293b",
+  },
+  navigatorHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    backgroundColor: "#111827",
+  },
+  navigatorDistance: {
+    color: "#ffffff",
+    fontSize: 28,
+    fontWeight: "800",
+  },
+  navigatorInstruction: {
+    color: "#dbe4ff",
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  navigatorExitPill: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    backgroundColor: "#374151",
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  navigatorExitText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  navigatorMapCard: {
+    backgroundColor: "#e5e7eb",
+    height: 420,
+  },
+  navigatorOverlay: {
+    width: "100%",
+    height: "100%",
+  },
+  navigatorFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    backgroundColor: "#ffffff",
+  },
+  navigatorMetric: {
+    alignItems: "center",
+    flex: 1,
+  },
+  navigatorMetricValue: {
+    color: "#111827",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  navigatorMetricLabel: {
+    color: "#6b7280",
+    marginTop: 2,
+    fontSize: 12,
+    textTransform: "uppercase",
   },
   sceneCard: {
     backgroundColor: "#ffffff",
