@@ -14,6 +14,10 @@ import {
 } from "react-native";
 import ImageZoom from "react-native-image-pan-zoom";
 import Svg, { Circle, G, Polyline, Text as SvgText } from "react-native-svg";
+import {
+  getLivePosition,
+  type LivePosition,
+} from "../services/positioning-adapter";
 
 /* =======================
    TYPES
@@ -29,6 +33,7 @@ type Edge = {
   target: string;
   weight: number;
 };
+
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -351,6 +356,61 @@ export default function CampusMap() {
 
   const [selectedStartId, setSelectedStartId] = useState<string | null>("N1");
   const [selectedEndId, setSelectedEndId] = useState<string | null>("N11");
+  const [livePosition, setLivePosition] = useState<LivePosition | null>(null);
+  const hasLiveFix = Boolean(livePosition && livePosition.timestamp > 0);
+
+  const getFloorFromPlan = (planId?: string): number => {
+    if (!planId) return 4;
+    if (planId.includes("ENG3")) return 3;
+    return 4;
+  };
+
+  const normalizePosition = (v: number, max: number): number => {
+    if (v <= 1 && v >= 0) return v * max;
+    return Math.max(0, Math.min(v, max));
+  };
+
+  const nearestNode = (x: number, y: number, floor: number): GraphNode | null => {
+    const floorNodes = allNodes.filter((n) => n.floor === floor);
+    if (!floorNodes.length) return null;
+
+    return floorNodes.reduce((closest, node) => {
+      const closestDist = Math.hypot(closest.x - x, closest.y - y);
+      const nodeDist = Math.hypot(node.x - x, node.y - y);
+      return nodeDist < closestDist ? node : closest;
+    });
+  };
+
+  const syncStartWithLiveLocation = async () => {
+    const position = await getLivePosition();
+    setLivePosition(position);
+
+    if (position.timestamp <= 0) {
+      Alert.alert(
+        "No live location available",
+        "Set EXPO_PUBLIC_POSITION_ENDPOINT to your lathika API (recommended) or run both features in the same app runtime.",
+      );
+      return;
+    }
+
+    const floor = getFloorFromPlan(position.planId);
+    const px = normalizePosition(position.x, imageWidth);
+    const py = normalizePosition(position.y, imageHeight);
+    const node = nearestNode(px, py, floor);
+
+    if (!node) {
+      Alert.alert("Unable to match your live location to a route node.");
+      return;
+    }
+
+    setCurrentFloor(floor);
+    setSelectedStartId(node.id);
+  };
+
+  useEffect(() => {
+    void syncStartWithLiveLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* =======================
      RUN DIJKSTRA
@@ -473,7 +533,17 @@ export default function CampusMap() {
         <View style={styles.findButton}>
           <Button title="Find Route" onPress={() => runDijkstra()} />
         </View>
+        <View style={styles.findButton}>
+          <Button title="Use My Location" onPress={() => void syncStartWithLiveLocation()} />
+        </View>
       </View>
+
+      {livePosition && (
+        <Text style={styles.livePositionText}>
+          {hasLiveFix ? "Live" : "Last/Default"}: ({livePosition.x.toFixed(2)}, {livePosition.y.toFixed(2)})
+          {livePosition.planId ? ` • ${livePosition.planId}` : ""}
+        </Text>
+      )}
 
       <View style={styles.floorButtons}>
         <Button title="1st Floor" onPress={() => setCurrentFloor(1)} />
@@ -646,5 +716,11 @@ const styles = StyleSheet.create({
   findButton: {
     justifyContent: "center",
     marginLeft: 8,
+  },
+  livePositionText: {
+    marginTop: 8,
+    marginHorizontal: 12,
+    color: "#1d4ed8",
+    fontWeight: "600",
   },
 });
