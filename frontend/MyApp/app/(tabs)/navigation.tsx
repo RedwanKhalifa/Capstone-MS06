@@ -4,21 +4,24 @@ import Svg, { Circle, Line, Path, Polygon, Polyline, Rect, Text as SvgText } fro
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import {
-  DESTINATION_ROOMS,
   DEMO_ROOMS,
+  DESTINATION_ROOMS,
+  FLOORS,
   NAVIGATION_START_ROOM_ID,
   type DemoFloor,
+  type DemoFloorId,
   type DemoRoom,
   getNavigationDemoRoute,
 } from "../../services/navigation-demo";
 
-const FRAME_INTERVAL_MS = 120;
-const FLOOR_HEIGHT = 22;
-const ROOM_HEIGHT = 10;
-const ISO_X = 1.55;
-const ISO_Y = 0.9;
-const BASE_X = 176;
-const BASE_Y = 186;
+const FRAME_INTERVAL_MS = 110;
+const FLOOR_STEP = 15;
+const ROOM_HEIGHT = 7;
+const ISO_X = 1.48;
+const ISO_Y = 0.84;
+const BASE_X = 178;
+const BASE_Y = 232;
+const MIN_LEVEL_INDEX = Math.min(...FLOORS.map((floor) => floor.levelIndex));
 
 type IsoPoint = {
   x: number;
@@ -43,6 +46,19 @@ function shadeHex(hex: string, amount: number) {
   return `#${[red, green, blue].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
+function getFloorMeta(floorId: DemoFloorId) {
+  const floor = FLOORS.find((entry) => entry.id === floorId);
+  if (!floor) {
+    throw new Error(`Unknown floor: ${floorId}`);
+  }
+  return floor;
+}
+
+function levelZ(floorId: DemoFloorId) {
+  const floor = getFloorMeta(floorId);
+  return 18 + (floor.levelIndex - MIN_LEVEL_INDEX) * FLOOR_STEP;
+}
+
 function projectPoint(x: number, y: number, z: number): IsoPoint {
   return {
     x: BASE_X + (x - y) * ISO_X,
@@ -52,10 +68,6 @@ function projectPoint(x: number, y: number, z: number): IsoPoint {
 
 function polygonString(points: IsoPoint[]) {
   return points.map((point) => `${point.x},${point.y}`).join(" ");
-}
-
-function levelZ(floor: DemoFloor) {
-  return floor === 1 ? FLOOR_HEIGHT : FLOOR_HEIGHT * 2;
 }
 
 function extrudeBox(
@@ -80,131 +92,161 @@ function extrudeBox(
     top: [frontLeftTop, frontRightTop, backRightTop, backLeftTop],
     left: [frontLeftBottom, frontLeftTop, backLeftTop, backLeftBottom],
     right: [frontRightBottom, frontRightTop, backRightTop, backRightBottom],
-    front: [frontLeftBottom, frontRightBottom, frontRightTop, frontLeftTop],
   };
 }
 
 function drawTree(x: number, y: number, key: string) {
-  const trunkTop = projectPoint(x, y, 3);
-  const canopy = projectPoint(x, y, 9);
+  const trunkTop = projectPoint(x, y, 5);
+  const canopy = projectPoint(x, y, 13);
 
   return (
     <React.Fragment key={key}>
-      <Line x1={trunkTop.x} y1={trunkTop.y} x2={trunkTop.x} y2={trunkTop.y + 8} stroke="#8b6a4f" strokeWidth={2.2} />
-      <Circle cx={canopy.x} cy={canopy.y} r={5.3} fill="#96c67d" />
-      <Circle cx={canopy.x - 4} cy={canopy.y + 2} r={3.2} fill="#82b56b" />
-      <Circle cx={canopy.x + 4} cy={canopy.y + 1} r={3.4} fill="#a5d28d" />
+      <Line x1={trunkTop.x} y1={trunkTop.y} x2={trunkTop.x} y2={trunkTop.y + 7} stroke="#907258" strokeWidth={2} />
+      <Circle cx={canopy.x} cy={canopy.y} r={4.8} fill="#9cc980" />
+      <Circle cx={canopy.x - 4} cy={canopy.y + 2} r={2.8} fill="#8bbb72" />
+      <Circle cx={canopy.x + 4} cy={canopy.y + 1} r={3} fill="#a8d78f" />
     </React.Fragment>
   );
 }
 
-function renderRoomBlock(room: DemoRoom, isDestination: boolean, isStart: boolean) {
-  const bottomZ = levelZ(room.floor);
+function roomOpacity(room: DemoRoom, activeFloorId: DemoFloorId, floorsOnRoute: DemoFloorId[]) {
+  if (room.floorId === activeFloorId) {
+    return 1;
+  }
+  if (floorsOnRoute.includes(room.floorId)) {
+    return 0.78;
+  }
+  return 0.28;
+}
+
+function renderRoomBlock(
+  room: DemoRoom,
+  activeFloorId: DemoFloorId,
+  floorsOnRoute: DemoFloorId[],
+  destinationId: string
+) {
+  const opacity = roomOpacity(room, activeFloorId, floorsOnRoute);
+  const bottomZ = levelZ(room.floorId);
   const block = extrudeBox(room.x, room.y, room.width, room.height, bottomZ, ROOM_HEIGHT);
-  const roofColor = isDestination ? "#ffd166" : isStart ? "#b8f2e6" : shadeHex(room.color, 20);
+  const isStart = room.id === NAVIGATION_START_ROOM_ID;
+  const isDestination = room.id === destinationId;
+  const roofColor = isDestination ? "#ffd166" : isStart ? "#c4f1df" : shadeHex(room.color, 18);
   const leftColor = shadeHex(room.color, -14);
-  const rightColor = shadeHex(room.color, -34);
-  const textPoint = projectPoint(room.x + room.width / 2, room.y + room.height / 2, bottomZ + ROOM_HEIGHT + 2);
+  const rightColor = shadeHex(room.color, -32);
+  const labelPoint = projectPoint(room.x + room.width / 2, room.y + room.height / 2, bottomZ + ROOM_HEIGHT + 2);
 
   return (
     <React.Fragment key={room.id}>
-      <Polygon points={polygonString(block.left)} fill={leftColor} />
-      <Polygon points={polygonString(block.right)} fill={rightColor} />
-      <Polygon points={polygonString(block.top)} fill={roofColor} stroke="#31406d" strokeWidth={1.2} />
-      {room.kind === "stairs" && (
-        <>
-          <Line x1={textPoint.x - 8} y1={textPoint.y + 2} x2={textPoint.x + 8} y2={textPoint.y - 2} stroke="#31406d" strokeWidth={1.5} />
-          <Line x1={textPoint.x - 6} y1={textPoint.y + 5} x2={textPoint.x + 10} y2={textPoint.y + 1} stroke="#31406d" strokeWidth={1.5} />
-          <Line x1={textPoint.x - 4} y1={textPoint.y + 8} x2={textPoint.x + 12} y2={textPoint.y + 4} stroke="#31406d" strokeWidth={1.5} />
-        </>
+      <Polygon points={polygonString(block.left)} fill={leftColor} opacity={opacity} />
+      <Polygon points={polygonString(block.right)} fill={rightColor} opacity={opacity} />
+      <Polygon points={polygonString(block.top)} fill={roofColor} stroke="#2f3f70" strokeWidth={1} opacity={opacity} />
+      {(room.floorId === activeFloorId || isStart || isDestination) && (
+        <SvgText x={labelPoint.x} y={labelPoint.y} fontSize={8.8} fontWeight="700" fill="#13244d" textAnchor="middle">
+          {room.label}
+        </SvgText>
       )}
-      <SvgText x={textPoint.x} y={textPoint.y} fontSize={10} fontWeight="700" fill="#10204b" textAnchor="middle">
-        {room.label}
-      </SvgText>
     </React.Fragment>
   );
 }
 
-function renderFloorPlate(floor: DemoFloor) {
-  const z = levelZ(floor) - 2;
+function renderFloorPlate(floorId: DemoFloorId, activeFloorId: DemoFloorId, floorsOnRoute: DemoFloorId[]) {
+  const z = levelZ(floorId) - 2;
   const plate = extrudeBox(2, 6, 92, 72, z, 3);
-  const topColor = floor === 1 ? "#edf1ff" : "#f7f9ff";
-  const leftColor = floor === 1 ? "#d2daf8" : "#d9e0fb";
-  const rightColor = floor === 1 ? "#bcc8ed" : "#c9d3f6";
+  const isActive = floorId === activeFloorId;
+  const inRoute = floorsOnRoute.includes(floorId);
+  const opacity = isActive ? 1 : inRoute ? 0.72 : 0.26;
+  const topColor = isActive ? "#eef3ff" : "#f7f9ff";
 
   return (
-    <React.Fragment key={`plate-${floor}`}>
-      <Polygon points={polygonString(plate.left)} fill={leftColor} />
-      <Polygon points={polygonString(plate.right)} fill={rightColor} />
-      <Polygon points={polygonString(plate.top)} fill={topColor} stroke="#c2ccef" strokeWidth={1.1} />
+    <React.Fragment key={`plate-${floorId}`}>
+      <Polygon points={polygonString(plate.left)} fill="#d0d8f4" opacity={opacity} />
+      <Polygon points={polygonString(plate.right)} fill="#bec8eb" opacity={opacity} />
+      <Polygon points={polygonString(plate.top)} fill={topColor} stroke="#bcc7eb" strokeWidth={1} opacity={opacity} />
     </React.Fragment>
   );
 }
 
-function routePolylinePath(points: { x: number; y: number; floor: DemoFloor }[]) {
-  return points
+function routePointsForFloor(
+  routePoints: { x: number; y: number; floorId: DemoFloorId }[],
+  floorId: DemoFloorId
+) {
+  return routePoints
+    .filter((point) => point.floorId === floorId)
     .map((point) => {
-      const projected = projectPoint(point.x, point.y, levelZ(point.floor) + ROOM_HEIGHT + 2.5);
+      const projected = projectPoint(point.x, point.y, levelZ(point.floorId) + ROOM_HEIGHT + 2.5);
       return `${projected.x},${projected.y}`;
     })
     .join(" ");
 }
 
-function activeMarker(point?: { x: number; y: number; floor: DemoFloor }) {
+function activeMarker(point?: { x: number; y: number; floorId: DemoFloorId }) {
   if (!point) {
     return null;
   }
 
-  const base = projectPoint(point.x, point.y, levelZ(point.floor) + ROOM_HEIGHT + 4);
+  const projected = projectPoint(point.x, point.y, levelZ(point.floorId) + ROOM_HEIGHT + 3.6);
   return (
     <>
-      <Circle cx={base.x} cy={base.y} r={7.5} fill="rgba(37,99,235,0.18)" />
-      <Circle cx={base.x} cy={base.y} r={4.8} fill="#ef4444" stroke="#ffffff" strokeWidth={2.2} />
+      <Circle cx={projected.x} cy={projected.y} r={8} fill="rgba(37,99,235,0.18)" />
+      <Circle cx={projected.x} cy={projected.y} r={4.8} fill="#ef4444" stroke="#ffffff" strokeWidth={2} />
     </>
   );
 }
 
-function campusRoadPath(startX: number, startY: number, endX: number, endY: number, width: number) {
-  const s1 = projectPoint(startX, startY, 0);
-  const s2 = projectPoint(startX + width, startY, 0);
-  const e1 = projectPoint(endX, endY, 0);
-  const e2 = projectPoint(endX + width, endY, 0);
-  return polygonString([s1, s2, e2, e1]);
+function campusRoad(startX: number, startY: number, endX: number, endY: number, width: number) {
+  return polygonString([
+    projectPoint(startX, startY, 0),
+    projectPoint(startX + width, startY, 0),
+    projectPoint(endX + width, endY, 0),
+    projectPoint(endX, endY, 0),
+  ]);
 }
 
-function IsometricBuildingScene({
+function destinationGroups() {
+  return FLOORS.map((floor) => ({
+    floor,
+    rooms: DESTINATION_ROOMS.filter((room) => room.floorId === floor.id),
+  })).filter((group) => group.rooms.length > 0);
+}
+
+function BuildingScene({
   destinationId,
-  currentPoint,
   routePoints,
+  currentPoint,
+  activeFloorId,
+  floorsOnRoute,
+  isolatedFloorId,
 }: {
   destinationId: string;
-  currentPoint?: { x: number; y: number; floor: DemoFloor };
-  routePoints: { x: number; y: number; floor: DemoFloor }[];
+  routePoints: { x: number; y: number; floorId: DemoFloorId }[];
+  currentPoint?: { x: number; y: number; floorId: DemoFloorId };
+  activeFloorId: DemoFloorId;
+  floorsOnRoute: DemoFloorId[];
+  isolatedFloorId?: DemoFloorId;
 }) {
-  const destinationRoom = DEMO_ROOMS.find((room) => room.id === destinationId);
+  const visibleFloors = isolatedFloorId
+    ? FLOORS.filter((floor) => floor.id === isolatedFloorId)
+    : FLOORS;
+  const visibleRooms = isolatedFloorId
+    ? DEMO_ROOMS.filter((room) => room.floorId === isolatedFloorId)
+    : DEMO_ROOMS;
+  const visibleRouteFloors = isolatedFloorId
+    ? floorsOnRoute.filter((floorId) => floorId === isolatedFloorId)
+    : floorsOnRoute;
 
   return (
     <View style={styles.sceneCard}>
-      <Svg viewBox="0 0 360 300" style={styles.sceneSvg}>
-        <Rect x={0} y={0} width={360} height={300} fill="#f7f8fb" />
-        <Polygon points={campusRoadPath(-18, 36, 120, 36, 14)} fill="#cfd6df" />
-        <Polygon points={campusRoadPath(12, -8, 12, 126, 14)} fill="#cfd6df" />
-        <Polygon points={campusRoadPath(56, -14, 56, 128, 12)} fill="#d8dde6" />
+      <Svg viewBox="0 0 360 370" style={styles.sceneSvg}>
+        <Rect x={0} y={0} width={360} height={370} fill="#f7f8fb" />
+        <Polygon points={campusRoad(-18, 34, 118, 34, 12)} fill="#d5dbe3" />
+        <Polygon points={campusRoad(14, -8, 14, 122, 12)} fill="#d0d7e1" />
+        <Polygon points={campusRoad(60, -10, 60, 124, 10)} fill="#dde3ea" />
 
-        <Path d="M 30 196 L 88 226" stroke="#ffffff" strokeWidth={2.2} strokeDasharray="6 6" />
-        <Path d="M 72 132 L 130 162" stroke="#ffffff" strokeWidth={2.2} strokeDasharray="6 6" />
-        <Path d="M 204 64 L 262 94" stroke="#ffffff" strokeWidth={2.2} strokeDasharray="6 6" />
+        <Path d="M 26 245 L 82 276" stroke="#ffffff" strokeWidth={2} strokeDasharray="6 6" />
+        <Path d="M 70 174 L 126 205" stroke="#ffffff" strokeWidth={2} strokeDasharray="6 6" />
+        <Path d="M 213 100 L 269 131" stroke="#ffffff" strokeWidth={2} strokeDasharray="6 6" />
 
-        {[
-          drawTree(14, 12, "t-1"),
-          drawTree(24, 18, "t-2"),
-          drawTree(86, 18, "t-3"),
-          drawTree(100, 28, "t-4"),
-          drawTree(14, 88, "t-5"),
-          drawTree(28, 92, "t-6"),
-          drawTree(110, 82, "t-7"),
-          drawTree(118, 94, "t-8"),
-        ]}
+        {[drawTree(10, 10, "t1"), drawTree(18, 16, "t2"), drawTree(24, 90, "t3"), drawTree(86, 10, "t4"), drawTree(98, 18, "t5"), drawTree(112, 86, "t6")]}
 
         <Polygon
           points={polygonString([
@@ -213,73 +255,57 @@ function IsometricBuildingScene({
             projectPoint(104, 86, 0),
             projectPoint(0, 86, 0),
           ])}
-          fill="#d9efc2"
+          fill="#dff0cb"
         />
 
-        {renderFloorPlate(1)}
-        {renderFloorPlate(2)}
+        {visibleFloors.map((floor) => renderFloorPlate(floor.id, activeFloorId, visibleRouteFloors))}
 
-        <Polygon
-          points={polygonString(extrudeBox(72, 34, 12, 24, levelZ(1), FLOOR_HEIGHT + 12).right)}
-          fill="#c76d6d"
-        />
-        <Polygon
-          points={polygonString(extrudeBox(72, 34, 12, 24, levelZ(1), FLOOR_HEIGHT + 12).left)}
-          fill="#d98989"
-        />
-        <Polygon
-          points={polygonString(extrudeBox(72, 34, 12, 24, levelZ(1), FLOOR_HEIGHT + 12).top)}
-          fill="#f2a6a6"
-          stroke="#7c3f3f"
-          strokeWidth={1.2}
-        />
-
-        {DEMO_ROOMS
+        {visibleRooms
           .slice()
-          .sort((a, b) => a.floor - b.floor || a.y - b.y || a.x - b.x)
-          .map((room) =>
-            renderRoomBlock(
-              room,
-              room.id === destinationId,
-              room.id === NAVIGATION_START_ROOM_ID
-            )
-          )}
+          .sort((a, b) => getFloorMeta(a.floorId).levelIndex - getFloorMeta(b.floorId).levelIndex || a.y - b.y || a.x - b.x)
+          .map((room) => renderRoomBlock(room, activeFloorId, visibleRouteFloors, destinationId))}
 
-        {routePoints.length > 1 && (
-          <Polyline
-            points={routePolylinePath(routePoints)}
-            fill="none"
-            stroke="#2563eb"
-            strokeWidth={4.8}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        )}
+        {visibleRouteFloors.map((floorId) => {
+          const points = routePointsForFloor(routePoints, floorId);
+          if (!points) {
+            return null;
+          }
+
+          return (
+            <Polyline
+              key={`route-${floorId}`}
+              points={points}
+              fill="none"
+              stroke="#2563eb"
+              strokeWidth={4.2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          );
+        })}
 
         {routePoints[0] && (() => {
-          const start = projectPoint(routePoints[0].x, routePoints[0].y, levelZ(routePoints[0].floor) + ROOM_HEIGHT + 2.5);
-          return <Circle cx={start.x} cy={start.y} r={4.8} fill="#10b981" stroke="#ffffff" strokeWidth={1.5} />;
+          const start = routePoints[0];
+          const projected = projectPoint(start.x, start.y, levelZ(start.floorId) + ROOM_HEIGHT + 2.5);
+          return <Circle cx={projected.x} cy={projected.y} r={4.8} fill="#10b981" stroke="#ffffff" strokeWidth={1.7} />;
         })()}
 
         {routePoints[routePoints.length - 1] && (() => {
           const end = routePoints[routePoints.length - 1];
-          const projected = projectPoint(end.x, end.y, levelZ(end.floor) + ROOM_HEIGHT + 2.5);
-          return <Circle cx={projected.x} cy={projected.y} r={5.2} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.7} />;
+          const projected = projectPoint(end.x, end.y, levelZ(end.floorId) + ROOM_HEIGHT + 2.5);
+          return <Circle cx={projected.x} cy={projected.y} r={5.1} fill="#f59e0b" stroke="#ffffff" strokeWidth={1.8} />;
         })()}
 
         {activeMarker(currentPoint)}
 
-        <SvgText x={42} y={34} fontSize={13} fontWeight="700" fill="#50617b">
-          ENG Building Demo
+        <SvgText x={36} y={42} fontSize={13} fontWeight="700" fill="#52627a">
+          {isolatedFloorId ? `${getFloorMeta(isolatedFloorId).label} Focus View` : "ENG Building Stack"}
         </SvgText>
-        <SvgText x={42} y={50} fontSize={11} fill="#6b7b93">
-          Isometric multi-floor navigation preview
+        <SvgText x={36} y={58} fontSize={11} fill="#6e7d94">
+          {isolatedFloorId
+            ? "Single-level inspection with route overlay for that floor"
+            : "Basement to 5th floor simplified from the supplied plans"}
         </SvgText>
-        {destinationRoom && (
-          <SvgText x={250} y={34} fontSize={12} fontWeight="700" fill="#2036a4" textAnchor="middle">
-            Destination: {destinationRoom.label}
-          </SvgText>
-        )}
       </Svg>
     </View>
   );
@@ -289,18 +315,28 @@ export default function NavigationScreen() {
   const [destinationId, setDestinationId] = useState("ENG201");
   const [frameIndex, setFrameIndex] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
+  const [viewMode, setViewMode] = useState<"stack" | "single">("stack");
+  const [selectedFloorId, setSelectedFloorId] = useState<DemoFloorId>("1");
 
   const route = useMemo(() => getNavigationDemoRoute(destinationId), [destinationId]);
   const currentPoint = route.animatedPoints[Math.min(frameIndex, route.animatedPoints.length - 1)];
-  const currentFloor = currentPoint?.floor ?? 1;
+  const activeFloorId = currentPoint?.floorId ?? route.startRoom.floorId;
   const hasArrived = frameIndex >= route.animatedPoints.length - 1;
   const startRoom = DEMO_ROOMS.find((room) => room.id === NAVIGATION_START_ROOM_ID) ?? route.startRoom;
   const destinationRoom = DEMO_ROOMS.find((room) => room.id === destinationId) ?? route.destinationRoom;
+  const groupedDestinations = useMemo(destinationGroups, []);
+  const visibleFloorId = viewMode === "single" ? selectedFloorId : undefined;
 
   useEffect(() => {
     setFrameIndex(0);
     setIsRunning(false);
   }, [destinationId]);
+
+  useEffect(() => {
+    if (viewMode === "single") {
+      setSelectedFloorId(activeFloorId);
+    }
+  }, [activeFloorId, viewMode]);
 
   useEffect(() => {
     if (!isRunning || route.animatedPoints.length < 2) {
@@ -313,7 +349,6 @@ export default function NavigationScreen() {
           setIsRunning(false);
           return current;
         }
-
         return current + 1;
       });
     }, FRAME_INTERVAL_MS);
@@ -322,52 +357,38 @@ export default function NavigationScreen() {
   }, [isRunning, route.animatedPoints.length]);
 
   const progress = route.animatedPoints.length > 1 ? frameIndex / (route.animatedPoints.length - 1) : 0;
-  const estimatedMinutes = Math.max(1, Math.round(route.distance / 42));
+  const estimatedMinutes = Math.max(1, Math.round(route.distance / 48));
   const routePoints = route.animatedPoints.map((point) => ({
     x: point.x,
     y: point.y,
-    floor: point.floor,
+    floorId: point.floorId,
   }));
 
-  const floorChips = useMemo(
-    () =>
-      [1, 2].map((floor) => ({
-        floor: floor as DemoFloor,
-        active: currentFloor === floor,
-        label: floor === 1 ? "Start level" : "Arrival level",
-      })),
-    [currentFloor]
-  );
+  const statusLabel = hasArrived
+    ? `Arrived at ${destinationRoom.label}`
+    : isRunning
+      ? `Navigating through ${getFloorMeta(activeFloorId).label}`
+      : "Ready to simulate";
 
   const startSimulation = () => {
     if (hasArrived) {
       setFrameIndex(0);
     }
-
     setIsRunning(true);
   };
 
   const pauseSimulation = () => setIsRunning(false);
-
   const resetSimulation = () => {
     setIsRunning(false);
     setFrameIndex(0);
   };
-
-  const statusLabel = hasArrived
-    ? `Arrived at ${destinationRoom.label}`
-    : isRunning
-      ? currentFloor === 1
-        ? "Moving toward stairs on floor 1"
-        : `Finishing route on floor ${currentFloor}`
-      : "Ready to simulate";
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.title}>Navigation</Text>
-          <Text style={styles.headerSubtitle}>Interactive indoor demo with 3D-style building view</Text>
+          <Text style={styles.headerSubtitle}>Full ENG stack with basement, lower ground, and floors 1 through 5</Text>
         </View>
         <View style={styles.profileCircle}>
           <IconSymbol name="location.fill" color="#0b0b0b" size={28} />
@@ -376,8 +397,8 @@ export default function NavigationScreen() {
 
       <View style={styles.heroCard}>
         <View style={styles.heroTopRow}>
-          <View>
-            <Text style={styles.heroEyebrow}>Default route demo</Text>
+          <View style={styles.heroTextWrap}>
+            <Text style={styles.heroEyebrow}>Expanded building model</Text>
             <Text style={styles.heroTitle}>
               {startRoom.label} to {destinationRoom.label}
             </Text>
@@ -389,17 +410,17 @@ export default function NavigationScreen() {
         </View>
 
         <Text style={styles.heroText}>
-          The student starts in ENG103, walks to the stair core on level 1, then continues to the selected room on level 2.
+          This version uses the supplied ENG floor plans to simulate routing across the whole building, including the basement, lower ground, and upper floors.
         </Text>
 
         <View style={styles.heroMetaRow}>
           <View style={styles.heroPill}>
-            <Text style={styles.heroPillLabel}>Route engine</Text>
-            <Text style={styles.heroPillValue}>Dijkstra</Text>
+            <Text style={styles.heroPillLabel}>Levels</Text>
+            <Text style={styles.heroPillValue}>B to 5</Text>
           </View>
           <View style={styles.heroPill}>
-            <Text style={styles.heroPillLabel}>Current floor</Text>
-            <Text style={styles.heroPillValue}>{currentFloor}</Text>
+            <Text style={styles.heroPillLabel}>Active floor</Text>
+            <Text style={styles.heroPillValue}>{getFloorMeta(activeFloorId).shortLabel}</Text>
           </View>
           <View style={styles.heroPill}>
             <Text style={styles.heroPillLabel}>ETA</Text>
@@ -410,32 +431,33 @@ export default function NavigationScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Choose destination room</Text>
-        <View style={styles.selectorGrid}>
-          {DESTINATION_ROOMS.map((room) => {
-            const selected = room.id === destinationId;
-
-            return (
-              <Pressable
-                key={room.id}
-                style={[styles.selectorButton, selected && styles.selectorButtonSelected]}
-                onPress={() => setDestinationId(room.id)}
-              >
-                <Text style={[styles.selectorButtonText, selected && styles.selectorButtonTextSelected]}>
-                  {room.label}
-                </Text>
-                <Text style={[styles.selectorFloorText, selected && styles.selectorButtonTextSelected]}>
-                  Floor {room.floor}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {groupedDestinations.map((group) => (
+          <View key={group.floor.id} style={styles.floorGroup}>
+            <Text style={styles.floorGroupTitle}>{group.floor.label}</Text>
+            <View style={styles.selectorGrid}>
+              {group.rooms.map((room) => {
+                const selected = room.id === destinationId;
+                return (
+                  <Pressable
+                    key={room.id}
+                    style={[styles.selectorButton, selected && styles.selectorButtonSelected]}
+                    onPress={() => setDestinationId(room.id)}
+                  >
+                    <Text style={[styles.selectorButtonText, selected && styles.selectorButtonTextSelected]}>
+                      {room.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ))}
       </View>
 
       <View style={styles.section}>
         <View style={styles.controlsCard}>
           <View style={styles.controlsHeader}>
-            <View>
+            <View style={styles.controlsTextWrap}>
               <Text style={styles.sectionTitle}>Run simulation</Text>
               <Text style={styles.statusText}>{statusLabel}</Text>
             </View>
@@ -457,31 +479,109 @@ export default function NavigationScreen() {
           </View>
 
           <View style={styles.floorChipRow}>
-            {floorChips.map((chip) => (
-              <View key={chip.floor} style={[styles.floorChip, chip.active && styles.floorChipActive]}>
-                <Text style={[styles.floorChipTitle, chip.active && styles.floorChipTitleActive]}>Floor {chip.floor}</Text>
-                <Text style={[styles.floorChipLabel, chip.active && styles.floorChipTitleActive]}>{chip.label}</Text>
-              </View>
-            ))}
+            {FLOORS.map((floor) => {
+              const active = floor.id === activeFloorId;
+              const inRoute = route.floorsOnRoute.includes(floor.id);
+
+              return (
+                <View
+                  key={floor.id}
+                  style={[
+                    styles.floorChip,
+                    active && styles.floorChipActive,
+                    inRoute && !active && styles.floorChipInRoute,
+                  ]}
+                >
+                  <Text style={[styles.floorChipTitle, active && styles.floorChipTitleActive]}>
+                    {floor.shortLabel}
+                  </Text>
+                  <Text style={[styles.floorChipLabel, active && styles.floorChipTitleActive]}>
+                    {inRoute ? "On route" : "Idle"}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
         </View>
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>View mode</Text>
+        <View style={styles.modeRow}>
+          <Pressable
+            style={[styles.modeButton, viewMode === "stack" && styles.modeButtonActive]}
+            onPress={() => setViewMode("stack")}
+          >
+            <Text style={[styles.modeButtonText, viewMode === "stack" && styles.modeButtonTextActive]}>
+              Building stack
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.modeButton, viewMode === "single" && styles.modeButtonActive]}
+            onPress={() => setViewMode("single")}
+          >
+            <Text style={[styles.modeButtonText, viewMode === "single" && styles.modeButtonTextActive]}>
+              Single floor
+            </Text>
+          </Pressable>
+        </View>
+
+        {viewMode === "single" && (
+          <View style={styles.singleFloorPanel}>
+            <Text style={styles.singleFloorTitle}>Choose level</Text>
+            <View style={styles.singleFloorRow}>
+              {FLOORS.map((floor: DemoFloor) => {
+                const selected = floor.id === selectedFloorId;
+                const onRoute = route.floorsOnRoute.includes(floor.id);
+
+                return (
+                  <Pressable
+                    key={floor.id}
+                    style={[
+                      styles.singleFloorChip,
+                      selected && styles.singleFloorChipActive,
+                      onRoute && !selected && styles.singleFloorChipRoute,
+                    ]}
+                    onPress={() => setSelectedFloorId(floor.id)}
+                  >
+                    <Text style={[styles.singleFloorChipText, selected && styles.singleFloorChipTextActive]}>
+                      {floor.shortLabel}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={styles.singleFloorHint}>
+              {route.floorsOnRoute.includes(selectedFloorId)
+                ? `${getFloorMeta(selectedFloorId).label} is part of the current route.`
+                : `${getFloorMeta(selectedFloorId).label} is not used by the current route, but you can still inspect it.`}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>3D navigation scene</Text>
-        <IsometricBuildingScene destinationId={destinationId} currentPoint={currentPoint} routePoints={routePoints} />
+        <BuildingScene
+          destinationId={destinationId}
+          routePoints={routePoints}
+          currentPoint={currentPoint}
+          activeFloorId={activeFloorId}
+          floorsOnRoute={route.floorsOnRoute}
+          isolatedFloorId={visibleFloorId}
+        />
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Route breakdown</Text>
         <View style={styles.stepsCard}>
           {route.segments.map((segment, index) => (
-            <View key={`${segment.floor}-${index}`} style={styles.stepRow}>
+            <View key={`${segment.floorId}-${index}`} style={styles.stepRow}>
               <View style={styles.stepIndex}>
                 <Text style={styles.stepIndexText}>{index + 1}</Text>
               </View>
               <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>Floor {segment.floor}</Text>
+                <Text style={styles.stepTitle}>{getFloorMeta(segment.floorId).label}</Text>
                 <Text style={styles.stepBody}>
                   {segment.fromLabel} to {segment.toLabel}
                 </Text>
@@ -519,6 +619,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 12,
   },
   title: {
     fontSize: 26,
@@ -529,7 +630,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: "#43506c",
     fontSize: 14,
-    maxWidth: 250,
+    maxWidth: 270,
   },
   profileCircle: {
     backgroundColor: "#f3d400",
@@ -550,6 +651,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
     gap: 12,
+  },
+  heroTextWrap: {
+    flex: 1,
   },
   heroEyebrow: {
     color: "#f7f0d7",
@@ -618,17 +722,25 @@ const styles = StyleSheet.create({
     color: "#1f2d86",
     marginBottom: 12,
   },
+  floorGroup: {
+    marginBottom: 16,
+  },
+  floorGroupTitle: {
+    color: "#32468e",
+    fontWeight: "800",
+    marginBottom: 10,
+    fontSize: 15,
+  },
   selectorGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 10,
   },
   selectorButton: {
-    width: "47%",
     backgroundColor: "#ffffff",
-    borderRadius: 18,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderWidth: 1,
     borderColor: "#d8deef",
   },
@@ -637,17 +749,12 @@ const styles = StyleSheet.create({
     borderColor: "#2c3ea3",
   },
   selectorButtonText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "800",
     color: "#10204b",
   },
   selectorButtonTextSelected: {
     color: "#2036a4",
-  },
-  selectorFloorText: {
-    marginTop: 4,
-    color: "#51607e",
-    fontSize: 13,
   },
   controlsCard: {
     backgroundColor: "#ffffff",
@@ -662,6 +769,9 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 12,
   },
+  controlsTextWrap: {
+    flex: 1,
+  },
   statusText: {
     color: "#4b5563",
     marginTop: 2,
@@ -671,6 +781,7 @@ const styles = StyleSheet.create({
     gap: 8,
     flexWrap: "wrap",
     justifyContent: "flex-end",
+    maxWidth: 190,
   },
   primaryButton: {
     backgroundColor: "#2c3ea3",
@@ -709,10 +820,11 @@ const styles = StyleSheet.create({
   floorChipRow: {
     marginTop: 14,
     flexDirection: "row",
-    gap: 10,
+    flexWrap: "wrap",
+    gap: 8,
   },
   floorChip: {
-    flex: 1,
+    minWidth: 66,
     borderRadius: 16,
     backgroundColor: "#f8f9ff",
     paddingVertical: 10,
@@ -723,6 +835,10 @@ const styles = StyleSheet.create({
   floorChipActive: {
     backgroundColor: "#2c3ea3",
     borderColor: "#2c3ea3",
+  },
+  floorChipInRoute: {
+    backgroundColor: "#edf3ff",
+    borderColor: "#8fb0ff",
   },
   floorChipTitle: {
     color: "#10204b",
@@ -736,6 +852,79 @@ const styles = StyleSheet.create({
   },
   floorChipTitleActive: {
     color: "#ffffff",
+  },
+  modeRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  modeButton: {
+    flex: 1,
+    borderRadius: 16,
+    backgroundColor: "#ffffff",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "#d8deef",
+    alignItems: "center",
+  },
+  modeButtonActive: {
+    backgroundColor: "#2c3ea3",
+    borderColor: "#2c3ea3",
+  },
+  modeButtonText: {
+    color: "#10204b",
+    fontWeight: "800",
+  },
+  modeButtonTextActive: {
+    color: "#ffffff",
+  },
+  singleFloorPanel: {
+    marginTop: 12,
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#dde3f4",
+  },
+  singleFloorTitle: {
+    color: "#1f2d86",
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  singleFloorRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  singleFloorChip: {
+    minWidth: 48,
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: "#f8f9ff",
+    borderWidth: 1,
+    borderColor: "#dde3f4",
+  },
+  singleFloorChipActive: {
+    backgroundColor: "#2c3ea3",
+    borderColor: "#2c3ea3",
+  },
+  singleFloorChipRoute: {
+    backgroundColor: "#edf3ff",
+    borderColor: "#8fb0ff",
+  },
+  singleFloorChipText: {
+    color: "#10204b",
+    fontWeight: "800",
+  },
+  singleFloorChipTextActive: {
+    color: "#ffffff",
+  },
+  singleFloorHint: {
+    marginTop: 10,
+    color: "#5f6d86",
+    lineHeight: 20,
   },
   sceneCard: {
     backgroundColor: "#ffffff",
@@ -751,7 +940,7 @@ const styles = StyleSheet.create({
   },
   sceneSvg: {
     width: "100%",
-    height: 360,
+    height: 420,
   },
   stepsCard: {
     backgroundColor: "#ffffff",

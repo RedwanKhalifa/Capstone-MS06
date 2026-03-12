@@ -43,9 +43,9 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="navigation"
         options={{
-          title: "Schedule",
+          title: "Navigation",
           tabBarIcon: ({ color }) => (
-            <IconSymbol name="calendar" color={color} size={28} />
+            <IconSymbol name="location.fill" color={color} size={28} />
           ),
         }}
       />

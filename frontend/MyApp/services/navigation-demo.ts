@@ -1,35 +1,43 @@
-export type DemoFloor = 1 | 2;
+export type DemoFloorId = "B" | "LG" | "1" | "2" | "3" | "4" | "5";
+
+export type DemoFloor = {
+  id: DemoFloorId;
+  label: string;
+  shortLabel: string;
+  levelIndex: number;
+};
 
 export type DemoRoom = {
   id: string;
   label: string;
-  floor: DemoFloor;
+  floorId: DemoFloorId;
   x: number;
   y: number;
   width: number;
   height: number;
   color: string;
-  kind?: "room" | "stairs";
+  connectTo: string;
+  category?: "lecture" | "lab" | "office" | "stairs" | "service";
 };
 
 export type DemoNode = {
   id: string;
-  floor: DemoFloor;
+  floorId: DemoFloorId;
   x: number;
   y: number;
-  label?: string;
+  label: string;
   kind: "room" | "hall" | "stairs";
 };
 
 export type DemoRoutePoint = {
   x: number;
   y: number;
-  floor: DemoFloor;
+  floorId: DemoFloorId;
   nodeId: string;
 };
 
 export type DemoRouteSegment = {
-  floor: DemoFloor;
+  floorId: DemoFloorId;
   fromLabel: string;
   toLabel: string;
 };
@@ -42,6 +50,7 @@ export type DemoRouteResult = {
   segments: DemoRouteSegment[];
   instructions: string[];
   distance: number;
+  floorsOnRoute: DemoFloorId[];
 };
 
 type Edge = {
@@ -49,75 +58,232 @@ type Edge = {
   weight: number;
 };
 
+const ROOM_COLORS = {
+  office: "#a8c5ff",
+  lecture: "#f6d26b",
+  lab: "#87d3c6",
+  service: "#b9b8ff",
+};
+
+export const FLOORS: DemoFloor[] = [
+  { id: "B", label: "Basement", shortLabel: "B", levelIndex: -1 },
+  { id: "LG", label: "Lower Ground", shortLabel: "LG", levelIndex: 0 },
+  { id: "1", label: "Floor 1", shortLabel: "1", levelIndex: 1 },
+  { id: "2", label: "Floor 2", shortLabel: "2", levelIndex: 2 },
+  { id: "3", label: "Floor 3", shortLabel: "3", levelIndex: 3 },
+  { id: "4", label: "Floor 4", shortLabel: "4", levelIndex: 4 },
+  { id: "5", label: "Floor 5", shortLabel: "5", levelIndex: 5 },
+];
+
 export const NAVIGATION_START_ROOM_ID = "ENG103";
 
+function createRoom(
+  label: string,
+  floorId: DemoFloorId,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  connectTo: string,
+  category: DemoRoom["category"] = "office"
+): DemoRoom {
+  return {
+    id: label,
+    label,
+    floorId,
+    x,
+    y,
+    width,
+    height,
+    connectTo,
+    category,
+    color: ROOM_COLORS[category ?? "office"],
+  };
+}
+
+const floorNorthBand = (
+  floorId: DemoFloorId,
+  rooms: Array<[string, number, number, string]>
+) => rooms.map(([label, x, width, connectTo]) => createRoom(label, floorId, x, 12, width, 9, connectTo, "office"));
+
+const floorSouthBand = (
+  floorId: DemoFloorId,
+  rooms: Array<[string, number, number, string, DemoRoom["category"]?]>
+) => rooms.map(([label, x, width, connectTo, category]) => createRoom(label, floorId, x, 52, width, 15, connectTo, category ?? "lab"));
+
 export const DEMO_ROOMS: DemoRoom[] = [
-  { id: "ENG101", label: "ENG101", floor: 1, x: 8, y: 16, width: 18, height: 14, color: "#7c92ff" },
-  { id: "ENG102", label: "ENG102", floor: 1, x: 30, y: 16, width: 18, height: 14, color: "#6ea8ff" },
-  { id: "ENG103", label: "ENG103", floor: 1, x: 8, y: 58, width: 24, height: 16, color: "#f4d35e" },
-  { id: "ENG104", label: "ENG104", floor: 1, x: 36, y: 58, width: 18, height: 16, color: "#98c1d9" },
-  { id: "STAIRS-1", label: "STAIRS", floor: 1, x: 70, y: 34, width: 16, height: 28, color: "#f28482", kind: "stairs" },
-  { id: "ENG201", label: "ENG201", floor: 2, x: 42, y: 12, width: 22, height: 16, color: "#f4d35e" },
-  { id: "ENG202", label: "ENG202", floor: 2, x: 14, y: 12, width: 22, height: 16, color: "#84dcc6" },
-  { id: "ENG203", label: "ENG203", floor: 2, x: 14, y: 58, width: 22, height: 16, color: "#a29bfe" },
-  { id: "ENG204", label: "ENG204", floor: 2, x: 42, y: 58, width: 22, height: 16, color: "#8ecae6" },
-  { id: "STAIRS-2", label: "STAIRS", floor: 2, x: 70, y: 34, width: 16, height: 28, color: "#f28482", kind: "stairs" },
+  createRoom("ENG B1", "B", 16, 48, 16, 16, "B_WEST", "service"),
+  createRoom("ENG B2", "B", 38, 48, 18, 16, "B_CENTER", "service"),
+  createRoom("ENG B9", "B", 60, 48, 18, 16, "B_CENTER", "lab"),
+  createRoom("ENG B10", "B", 18, 28, 18, 12, "B_WEST", "service"),
+  createRoom("ENG B17", "B", 80, 44, 14, 20, "B_EAST", "lab"),
+
+  ...floorNorthBand("LG", [
+    ["ENG LG 4", 10, 12, "LG_WEST"],
+    ["ENG LG 6", 24, 12, "LG_WEST"],
+    ["ENG LG 9", 38, 12, "LG_CENTER"],
+    ["ENG LG 14", 56, 14, "LG_CENTER"],
+    ["ENG LG 18", 74, 14, "LG_EAST"],
+  ]),
+  ...floorSouthBand("LG", [
+    ["ENG LG 24", 12, 18, "LG_WEST", "lecture"],
+    ["ENG LG 29", 34, 16, "LG_CENTER", "lecture"],
+    ["ENG LG 32", 54, 18, "LG_CENTER", "lecture"],
+    ["ENG LG 44", 76, 18, "LG_EAST", "lab"],
+    ["ENG LG 53", 56, 34, "LG_EAST", "lab"],
+  ]),
+
+  ...floorNorthBand("1", [
+    ["ENG116", 8, 10, "1_WEST"],
+    ["ENG120", 20, 10, "1_WEST"],
+    ["ENG126", 32, 10, "1_CENTER"],
+    ["ENG130", 44, 10, "1_CENTER"],
+    ["ENG137", 64, 10, "1_EAST"],
+    ["ENG140", 76, 10, "1_EAST"],
+    ["ENG144", 88, 8, "1_EAST"],
+  ]),
+  ...floorSouthBand("1", [
+    ["ENG101", 12, 16, "1_SOUTHWEST", "lecture"],
+    ["ENG103", 32, 16, "1_SOUTHCENTER", "lecture"],
+    ["ENG105", 52, 16, "1_SOUTHCENTER", "lecture"],
+    ["ENG109", 74, 20, "1_EAST", "lecture"],
+    ["ENG112", 78, 30, "1_EAST", "lab"],
+    ["ENG182", 60, 10, "1_CENTER", "service"],
+  ]),
+
+  ...floorNorthBand("2", [
+    ["ENG220", 8, 10, "2_WEST"],
+    ["ENG224", 20, 10, "2_WEST"],
+    ["ENG229", 32, 10, "2_CENTER"],
+    ["ENG235", 44, 10, "2_CENTER"],
+    ["ENG243", 64, 10, "2_EAST"],
+    ["ENG248", 76, 10, "2_EAST"],
+    ["ENG257", 88, 8, "2_EAST"],
+  ]),
+  ...floorSouthBand("2", [
+    ["ENG201", 12, 16, "2_SOUTHWEST", "lab"],
+    ["ENG203", 32, 16, "2_SOUTHCENTER", "lab"],
+    ["ENG209", 52, 16, "2_SOUTHCENTER", "lab"],
+    ["ENG217", 74, 20, "2_EAST", "lab"],
+    ["ENG239", 58, 12, "2_CENTER", "service"],
+    ["ENG270", 44, 10, "2_CENTER", "office"],
+    ["ENG290", 6, 12, "2_WEST", "office"],
+  ]),
+
+  ...floorNorthBand("3", [
+    ["ENG319", 8, 10, "3_WEST"],
+    ["ENG326", 20, 10, "3_WEST"],
+    ["ENG330", 32, 10, "3_CENTER"],
+    ["ENG339", 44, 10, "3_CENTER"],
+    ["ENG343", 64, 10, "3_EAST"],
+    ["ENG347", 76, 10, "3_EAST"],
+    ["ENG349", 88, 8, "3_EAST"],
+  ]),
+  ...floorSouthBand("3", [
+    ["ENG301", 12, 16, "3_SOUTHWEST", "lab"],
+    ["ENG304", 32, 16, "3_SOUTHCENTER", "lab"],
+    ["ENG309", 52, 16, "3_SOUTHCENTER", "lab"],
+    ["ENG312", 74, 20, "3_EAST", "lab"],
+    ["ENG327", 56, 12, "3_CENTER", "lab"],
+    ["ENG356", 44, 10, "3_CENTER", "office"],
+    ["ENG378", 6, 12, "3_WEST", "office"],
+  ]),
+
+  ...floorNorthBand("4", [
+    ["ENG420", 8, 10, "4_WEST"],
+    ["ENG426", 20, 10, "4_WEST"],
+    ["ENG430", 32, 10, "4_CENTER"],
+    ["ENG439", 44, 10, "4_CENTER"],
+    ["ENG443", 64, 10, "4_EAST"],
+    ["ENG447", 76, 10, "4_EAST"],
+    ["ENG449", 88, 8, "4_EAST"],
+  ]),
+  ...floorSouthBand("4", [
+    ["ENG401", 12, 16, "4_SOUTHWEST", "lab"],
+    ["ENG403", 32, 16, "4_SOUTHCENTER", "lab"],
+    ["ENG405", 52, 16, "4_SOUTHCENTER", "lab"],
+    ["ENG413", 74, 20, "4_EAST", "lab"],
+    ["ENG417", 56, 12, "4_CENTER", "service"],
+    ["ENG440", 44, 10, "4_CENTER", "office"],
+    ["ENG470", 6, 12, "4_WEST", "office"],
+  ]),
+
+  createRoom("ENG501", "5", 18, 46, 18, 18, "5_WEST", "service"),
+  createRoom("ENG502", "5", 42, 46, 18, 18, "5_CENTER", "service"),
+  createRoom("ENG503", "5", 66, 46, 16, 18, "5_EAST", "service"),
+  createRoom("ENG504", "5", 82, 28, 12, 14, "5_EAST", "service"),
 ];
 
-export const DESTINATION_ROOMS = DEMO_ROOMS.filter(
-  (room) => room.id !== NAVIGATION_START_ROOM_ID && room.kind !== "stairs"
+export const DESTINATION_ROOMS = DEMO_ROOMS.filter((room) => room.id !== NAVIGATION_START_ROOM_ID);
+
+const FLOOR_NODE_TEMPLATE: Record<string, { x: number; y: number; label: string; kind: DemoNode["kind"] }> = {
+  WEST: { x: 18, y: 36, label: "West Hall", kind: "hall" },
+  CENTER: { x: 50, y: 36, label: "Central Hall", kind: "hall" },
+  EAST: { x: 84, y: 36, label: "East Hall", kind: "hall" },
+  SOUTHWEST: { x: 22, y: 60, label: "South Wing", kind: "hall" },
+  SOUTHCENTER: { x: 50, y: 60, label: "South Spine", kind: "hall" },
+  STAIR: { x: 58, y: 36, label: "Main Stairs", kind: "stairs" },
+};
+
+const NODES: DemoNode[] = FLOORS.flatMap((floor) =>
+  Object.entries(FLOOR_NODE_TEMPLATE).map(([suffix, template]) => ({
+    id: `${floor.id}_${suffix}`,
+    floorId: floor.id,
+    x: template.x,
+    y: template.y,
+    label: template.label,
+    kind: template.kind,
+  }))
 );
 
-const NODES: DemoNode[] = [
-  { id: "ENG103", floor: 1, x: 24, y: 66, label: "ENG103", kind: "room" },
-  { id: "F1_HALL_WEST", floor: 1, x: 42, y: 66, label: "Hallway", kind: "hall" },
-  { id: "F1_HALL_CENTER", floor: 1, x: 58, y: 50, label: "Hallway", kind: "hall" },
-  { id: "STAIRS_1", floor: 1, x: 78, y: 50, label: "Stairs", kind: "stairs" },
-  { id: "STAIRS_2", floor: 2, x: 78, y: 50, label: "Stairs", kind: "stairs" },
-  { id: "F2_HALL_CENTER", floor: 2, x: 58, y: 36, label: "Upper Hallway", kind: "hall" },
-  { id: "ENG201", floor: 2, x: 53, y: 28, label: "ENG201", kind: "room" },
-  { id: "ENG202", floor: 2, x: 25, y: 28, label: "ENG202", kind: "room" },
-  { id: "F2_HALL_WEST", floor: 2, x: 32, y: 50, label: "Upper Hallway", kind: "hall" },
-  { id: "ENG203", floor: 2, x: 25, y: 58, label: "ENG203", kind: "room" },
-  { id: "ENG204", floor: 2, x: 53, y: 58, label: "ENG204", kind: "room" },
-];
+const EDGES: Record<string, Edge[]> = {};
 
-const EDGES: Record<string, Edge[]> = {
-  ENG103: [{ target: "F1_HALL_WEST", weight: 18 }],
-  F1_HALL_WEST: [
-    { target: "ENG103", weight: 18 },
-    { target: "F1_HALL_CENTER", weight: 22 },
-  ],
-  F1_HALL_CENTER: [
-    { target: "F1_HALL_WEST", weight: 22 },
-    { target: "STAIRS_1", weight: 20 },
-  ],
-  STAIRS_1: [{ target: "F1_HALL_CENTER", weight: 20 }, { target: "STAIRS_2", weight: 26 }],
-  STAIRS_2: [{ target: "STAIRS_1", weight: 26 }, { target: "F2_HALL_CENTER", weight: 18 }],
-  F2_HALL_CENTER: [
-    { target: "STAIRS_2", weight: 18 },
-    { target: "ENG201", weight: 10 },
-    { target: "ENG202", weight: 34 },
-    { target: "F2_HALL_WEST", weight: 30 },
-  ],
-  ENG201: [{ target: "F2_HALL_CENTER", weight: 10 }],
-  ENG202: [{ target: "F2_HALL_CENTER", weight: 34 }],
-  F2_HALL_WEST: [
-    { target: "F2_HALL_CENTER", weight: 30 },
-    { target: "ENG203", weight: 12 },
-    { target: "ENG204", weight: 22 },
-  ],
-  ENG203: [{ target: "F2_HALL_WEST", weight: 12 }],
-  ENG204: [{ target: "F2_HALL_WEST", weight: 22 }],
-};
+function link(a: string, b: string, weight: number) {
+  if (!EDGES[a]) {
+    EDGES[a] = [];
+  }
+  if (!EDGES[b]) {
+    EDGES[b] = [];
+  }
+  EDGES[a].push({ target: b, weight });
+  EDGES[b].push({ target: a, weight });
+}
 
-const ROOM_TO_NODE: Record<string, string> = {
-  ENG103: "ENG103",
-  ENG201: "ENG201",
-  ENG202: "ENG202",
-  ENG203: "ENG203",
-  ENG204: "ENG204",
-};
+FLOORS.forEach((floor) => {
+  link(`${floor.id}_WEST`, `${floor.id}_CENTER`, 30);
+  link(`${floor.id}_CENTER`, `${floor.id}_EAST`, 34);
+  link(`${floor.id}_WEST`, `${floor.id}_SOUTHWEST`, 24);
+  link(`${floor.id}_CENTER`, `${floor.id}_SOUTHCENTER`, 24);
+  link(`${floor.id}_CENTER`, `${floor.id}_STAIR`, 8);
+  link(`${floor.id}_SOUTHWEST`, `${floor.id}_SOUTHCENTER`, 28);
+  link(`${floor.id}_SOUTHCENTER`, `${floor.id}_EAST`, 32);
+});
+
+for (let index = 0; index < FLOORS.length - 1; index += 1) {
+  const current = FLOORS[index];
+  const next = FLOORS[index + 1];
+  link(`${current.id}_STAIR`, `${next.id}_STAIR`, 20);
+}
+
+DEMO_ROOMS.forEach((room) => {
+  NODES.push({
+    id: room.id,
+    floorId: room.floorId,
+    x: room.x + room.width / 2,
+    y: room.y + room.height / 2,
+    label: room.label,
+    kind: "room",
+  });
+  link(room.id, room.connectTo, 10);
+});
+
+function getFloor(floorId: DemoFloorId) {
+  const floor = FLOORS.find((entry) => entry.id === floorId);
+  if (!floor) {
+    throw new Error(`Unknown floor: ${floorId}`);
+  }
+  return floor;
+}
 
 function getNode(nodeId: string) {
   const node = NODES.find((entry) => entry.id === nodeId);
@@ -186,15 +352,16 @@ function dijkstra(startId: string, endId: string) {
 }
 
 function interpolateSegment(start: DemoNode, end: DemoNode) {
-  const samples = Math.max(8, Math.round(Math.hypot(end.x - start.x, end.y - start.y) / 2));
+  const samples = Math.max(6, Math.round(Math.hypot(end.x - start.x, end.y - start.y) / 2));
   const points: DemoRoutePoint[] = [];
 
   for (let index = 0; index <= samples; index += 1) {
     const progress = index / samples;
+    const floorId = progress < 0.5 ? start.floorId : end.floorId;
     points.push({
       x: start.x + (end.x - start.x) * progress,
       y: start.y + (end.y - start.y) * progress,
-      floor: progress < 0.5 ? start.floor : end.floor,
+      floorId,
       nodeId: progress < 1 ? start.id : end.id,
     });
   }
@@ -209,19 +376,28 @@ function createAnimatedPoints(nodePath: DemoNode[]) {
 
   return nodePath.flatMap((node, index) => {
     if (index === nodePath.length - 1) {
-      return [{ x: node.x, y: node.y, floor: node.floor, nodeId: node.id }];
+      return [{ x: node.x, y: node.y, floorId: node.floorId, nodeId: node.id }];
     }
-
     const segmentPoints = interpolateSegment(node, nodePath[index + 1]);
     return index === 0 ? segmentPoints : segmentPoints.slice(1);
   });
 }
 
-function buildInstructions(startRoom: DemoRoom, destinationRoom: DemoRoom) {
+function buildInstructions(startRoom: DemoRoom, destinationRoom: DemoRoom, floorsOnRoute: DemoFloorId[]) {
+  const destinationFloor = getFloor(destinationRoom.floorId);
+  const sameFloor = startRoom.floorId === destinationRoom.floorId;
+
+  if (sameFloor) {
+    return [
+      `Leave ${startRoom.label} and join the main corridor on floor ${startRoom.floorId}.`,
+      `Follow the corridor across the building to ${destinationRoom.label}.`,
+    ];
+  }
+
   return [
-    `Leave ${startRoom.label} and join the first-floor hallway.`,
-    "Continue straight to the stairs and go up to level 2.",
-    `Exit the stairs and follow the second-floor hallway to ${destinationRoom.label}.`,
+    `Leave ${startRoom.label} and head toward the main stair core on floor ${startRoom.floorId}.`,
+    `Travel through the stair core across ${floorsOnRoute.length - 1} floor transitions.`,
+    `Exit on ${destinationFloor.label} and continue through the corridor network to ${destinationRoom.label}.`,
   ];
 }
 
@@ -231,29 +407,29 @@ function buildSegments(nodePath: DemoNode[]) {
   for (let index = 0; index < nodePath.length - 1; index += 1) {
     const current = nodePath[index];
     const next = nodePath[index + 1];
+    const previousSegment = segments[segments.length - 1];
 
-    if (current.floor !== next.floor) {
+    if (current.floorId !== next.floorId) {
       segments.push({
-        floor: current.floor,
-        fromLabel: current.label ?? current.id,
-        toLabel: "Stairs",
+        floorId: current.floorId,
+        fromLabel: current.label,
+        toLabel: "Main Stairs",
       });
       segments.push({
-        floor: next.floor,
-        fromLabel: "Stairs",
-        toLabel: next.label ?? next.id,
+        floorId: next.floorId,
+        fromLabel: "Main Stairs",
+        toLabel: next.label,
       });
       continue;
     }
 
-    const previousSegment = segments[segments.length - 1];
-    if (previousSegment && previousSegment.floor === current.floor) {
-      previousSegment.toLabel = next.label ?? next.id;
+    if (previousSegment && previousSegment.floorId === current.floorId) {
+      previousSegment.toLabel = next.label;
     } else {
       segments.push({
-        floor: current.floor,
-        fromLabel: current.label ?? current.id,
-        toLabel: next.label ?? next.id,
+        floorId: current.floorId,
+        fromLabel: current.label,
+        toLabel: next.label,
       });
     }
   }
@@ -264,10 +440,9 @@ function buildSegments(nodePath: DemoNode[]) {
 export function getNavigationDemoRoute(destinationRoomId: string): DemoRouteResult {
   const startRoom = getRoom(NAVIGATION_START_ROOM_ID);
   const destinationRoom = getRoom(destinationRoomId);
-  const startNodeId = ROOM_TO_NODE[startRoom.id];
-  const endNodeId = ROOM_TO_NODE[destinationRoom.id];
-  const result = dijkstra(startNodeId, endNodeId);
-  const nodePath = result.nodeIds.map(getNode);
+  const routeData = dijkstra(startRoom.id, destinationRoom.id);
+  const nodePath = routeData.nodeIds.map(getNode);
+  const floorsOnRoute = [...new Set(nodePath.map((node) => node.floorId))] as DemoFloorId[];
 
   return {
     startRoom,
@@ -275,7 +450,8 @@ export function getNavigationDemoRoute(destinationRoomId: string): DemoRouteResu
     nodePath,
     animatedPoints: createAnimatedPoints(nodePath),
     segments: buildSegments(nodePath),
-    instructions: buildInstructions(startRoom, destinationRoom),
-    distance: result.distance,
+    instructions: buildInstructions(startRoom, destinationRoom, floorsOnRoute),
+    distance: routeData.distance,
+    floorsOnRoute,
   };
 }

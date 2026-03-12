@@ -2,14 +2,18 @@ import React, { useState } from 'react';
 import { Image, LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Svg, { Circle, Polyline } from 'react-native-svg';
 
 import type { AnchorPoint } from '@/types/fingerprint';
+
+type NormalizedPoint = { xNorm: number; yNorm: number };
 
 type Props = {
   imageSource: any;
   points: AnchorPoint[];
-  liveDot?: { xNorm: number; yNorm: number } | null;
+  liveDot?: NormalizedPoint | null;
   selectedPointId?: string | null;
+  route?: NormalizedPoint[];
   canAddPoint?: boolean;
   onAddPoint?: (xNorm: number, yNorm: number) => void;
   dragPointId?: string | null;
@@ -21,6 +25,7 @@ const clamp = (n: number) => Math.max(0, Math.min(1, n));
 export function FloorplanCanvas({
   imageSource,
   points,
+  route,
   selectedPointId,
   liveDot,
   canAddPoint = false,
@@ -29,6 +34,7 @@ export function FloorplanCanvas({
   onDragPoint,
 }: Props) {
   const [size, setSize] = useState({ w: 1, h: 1 });
+  const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
   const scale = useSharedValue(1);
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -36,8 +42,32 @@ export function FloorplanCanvas({
   const startTx = useSharedValue(0);
   const startTy = useSharedValue(0);
 
-  const asset = Image.resolveAssetSource(imageSource);
-  const imageRatio = asset.width / asset.height;
+  React.useEffect(() => {
+    // Some platforms (web) do not support Image.resolveAssetSource.
+    // Use Image.getSize when possible to infer aspect ratio.
+    if (Image.resolveAssetSource) {
+      const asset = Image.resolveAssetSource(imageSource);
+      setImageSize({ width: asset.width, height: asset.height });
+      return;
+    }
+
+    const uri =
+      typeof imageSource === 'string'
+        ? imageSource
+        : typeof imageSource === 'object' && imageSource?.uri
+        ? imageSource.uri
+        : null;
+
+    if (!uri) return;
+
+    Image.getSize(
+      uri,
+      (width, height) => setImageSize({ width, height }),
+      () => {},
+    );
+  }, [imageSource]);
+
+  const imageRatio = imageSize.width / imageSize.height;
   const viewRatio = size.w / size.h;
   const baseW = viewRatio > imageRatio ? size.h * imageRatio : size.w;
   const baseH = viewRatio > imageRatio ? size.h : size.w / imageRatio;
@@ -107,6 +137,28 @@ export function FloorplanCanvas({
               mapStyle,
             ]}>
             <Image source={imageSource} style={{ width: baseW, height: baseH }} resizeMode="contain" />
+            {route && route.length > 1 ? (
+              <Svg width={baseW} height={baseH} style={StyleSheet.absoluteFill}>
+                <Polyline
+                  points={route.map((pt) => `${pt.xNorm * baseW},${pt.yNorm * baseH}`).join(' ')}
+                  fill="none"
+                  stroke="#2c3ea3"
+                  strokeWidth={3}
+                />
+                <Circle
+                  cx={route[0].xNorm * baseW}
+                  cy={route[0].yNorm * baseH}
+                  r={5}
+                  fill="#1d4ed8"
+                />
+                <Circle
+                  cx={route[route.length - 1].xNorm * baseW}
+                  cy={route[route.length - 1].yNorm * baseH}
+                  r={5}
+                  fill="#f3d400"
+                />
+              </Svg>
+            ) : null}
             {points.map((p) => (
               <View key={p.id} style={[styles.markerSlot, { left: p.xNorm * baseW - 9, top: p.yNorm * baseH - 9 }]}>
                 <Animated.View style={[styles.marker, p.id === selectedPointId && styles.markerSelected, markerStyle]} />
