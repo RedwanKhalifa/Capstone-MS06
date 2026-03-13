@@ -448,7 +448,7 @@ function NavigatorScene({
       right: [frontRightBottom, frontRightTop, backRightTop, backRightBottom],
     };
   };
-  const guideRoute = routeOnFloor
+  const guideRoutePath = routeOnFloor
     .map((point) => {
       const projected = projectGuide(point.x, point.y, floorBaseZ + ROOM_HEIGHT + 2.8);
       return `${projected.x},${projected.y}`;
@@ -537,8 +537,6 @@ function NavigatorScene({
               room.y + room.height / 2,
               bottomZ + ROOM_HEIGHT + 5
             );
-            const labelVisible = isStart || isDestination || (Math.abs(room.localX) < 28 && room.localY > -8 && room.localY < 48);
-
             return (
               <React.Fragment key={`guide-${room.id}`}>
                 <Polygon points={polygonString(block.left)} fill={leftColor} opacity={0.96} />
