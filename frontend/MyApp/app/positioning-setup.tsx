@@ -12,6 +12,7 @@ import { setLivePosition, setPlanName, type LivePosition } from '@/services/posi
 import { BEACON_UUID_DEFAULT, FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
+type LiveMode = 'bluetooth' | 'manual';
 const LIVE_INFERENCE_INTERVAL_MS = 1000;
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -38,6 +39,7 @@ export default function PositioningSetupScreen() {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [medians, setMedians] = useState<Record<string, number>>({});
   const [runningLive, setRunningLive] = useState(false);
+  const [liveMode, setLiveMode] = useState<LiveMode>('bluetooth');
   const [prediction, setPrediction] = useState<LivePosition | null>(null);
   const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
   const { beacons, isScanning, scanError, start, stop, clear } = useBeaconRanger(uuid);
@@ -239,6 +241,7 @@ export default function PositioningSetupScreen() {
   };
 
   const handleLiveStart = async () => {
+    setLiveMode('bluetooth');
     const granted = await requestBlePermissions();
     if (!granted) {
       Alert.alert('Permissions required', 'Bluetooth and Location permissions are required to scan beacons.');
@@ -249,6 +252,18 @@ export default function PositioningSetupScreen() {
     clear();
     start();
     setRunningLive(true);
+  };
+
+  const setManualLivePosition = (xNorm: number, yNorm: number) => {
+    const now = Date.now();
+    const planId = selectedPlanID;
+    stop();
+    setRunningLive(false);
+    prevRef.current = null;
+    setLiveMode('manual');
+    setLiveConfidence(null);
+    setPrediction({ x: xNorm, y: yNorm, timestamp: now, planId });
+    void setLivePosition(xNorm, yNorm, { timestamp: now, planId, accuracy: 0 });
   };
 
   const handleCollectStart = async () => {
@@ -321,17 +336,59 @@ export default function PositioningSetupScreen() {
           imageSource={selectedPlan.image}
           points={planPoints}
           liveDot={prediction ? { xNorm: prediction.x, yNorm: prediction.y } : null}
+          canAddPoint={liveMode === 'manual'}
+          onAddPoint={setManualLivePosition}
         />
       </View>
 
       <TextInput style={styles.input} value={uuid} onChangeText={setUuid} placeholder="Beacon UUID" />
+      <View style={styles.rowWrap}>
+        <Pressable
+          style={[styles.chip, liveMode === 'manual' && styles.chipActive]}
+          onPress={() => {
+            stop();
+            setRunningLive(false);
+            prevRef.current = null;
+            setLiveMode('manual');
+            setLiveConfidence(null);
+          }}>
+          <Text>Manual mode</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.chip, liveMode === 'bluetooth' && styles.chipActive]}
+          onPress={() => setLiveMode('bluetooth')}>
+          <Text>Bluetooth mode</Text>
+        </Pressable>
+        <Pressable
+          style={styles.btnOutline}
+          disabled={!selectedPoint}
+          onPress={() => {
+            if (!selectedPoint) return;
+            setManualLivePosition(selectedPoint.xNorm, selectedPoint.yNorm);
+          }}>
+          <Text>{selectedPoint ? `Use ${selectedPoint.name}` : 'Select point in Collect/Plans'}</Text>
+        </Pressable>
+      </View>
+
+      {liveMode === 'manual' ? (
+        <Text style={styles.hint}>Manual mode active: tap on the map to set current position for the app.</Text>
+      ) : (
+        <Text style={styles.hint}>Bluetooth mode active: live regression from beacon scans.</Text>
+      )}
+
       <Text style={styles.hint}>Perm requests Android BLE/location runtime permissions (Scan/Connect/Fine Location).</Text>
       <View style={styles.rowWrap}>
         <Pressable style={styles.btn} onPress={requestBlePermissions}><Text style={styles.btnText}>Perm</Text></Pressable>
-        <Pressable style={styles.btn} onPress={handleLiveStart}><Text style={styles.btnText}>Start</Text></Pressable>
+        <Pressable style={styles.btn} onPress={handleLiveStart} disabled={liveMode !== 'bluetooth'}><Text style={styles.btnText}>Start</Text></Pressable>
         <Pressable style={styles.btnOutline} onPress={handleLiveStop}><Text>Stop</Text></Pressable>
       </View>
-      <Text>{isScanning ? `Scanning… Beacons found: ${beacons.length}` : 'Scanner stopped'}</Text>
+      <Text>
+        {liveMode === 'manual'
+          ? 'Manual mode does not require scanning.'
+          : isScanning
+            ? `Scanning… Beacons found: ${beacons.length}`
+            : 'Scanner stopped'}
+      </Text>
       {scanError ? <Text style={styles.errorText}>Scan error: {scanError}</Text> : null}
 
       <Text>
