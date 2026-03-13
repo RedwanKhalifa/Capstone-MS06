@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Svg, { Circle, Line, Path, Polygon, Polyline, Rect, Text as SvgText } from "react-native-svg";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
@@ -12,6 +12,7 @@ import {
   type DemoFloor,
   type DemoFloorFeature,
   type DemoFloorId,
+  type DemoNode,
   type DemoRoom,
   getNavigationDemoRoute,
 } from "../../services/navigation-demo";
@@ -28,6 +29,52 @@ const MIN_LEVEL_INDEX = Math.min(...FLOORS.map((floor) => floor.levelIndex));
 type IsoPoint = {
   x: number;
   y: number;
+};
+
+const FLOOR_PLAN_IMAGES: Partial<Record<DemoFloorId, { north?: number; south?: number; combined?: number }>> = {
+  B: {
+    combined: require("../../assets/eng-floorplans/Copy_of_ENG_BASEMENT_NORTH_SOUTH.png"),
+  },
+  LG: {
+    north: require("../../assets/eng-floorplans/Copy_of_ENG_LOWER_GROUND_FLOOR_NORTH.png"),
+    south: require("../../assets/eng-floorplans/Copy_of_ENG_LOWER_GROUND_FLOOR_SOUTH.png"),
+  },
+  "1": {
+    north: require("../../assets/eng-floorplans/Copy_of_ENG_1ST_FLOOR_NORTH.png"),
+    south: require("../../assets/eng-floorplans/Copy_of_ENG_1ST_FLOOR_SOUTH.png"),
+  },
+  "2": {
+    north: require("../../assets/eng-floorplans/Copy_of_ENG_2ND_FLOOR_NORTH.png"),
+    south: require("../../assets/eng-floorplans/Copy_of_ENG_2ND_FLOOR_SOUTH.png"),
+  },
+  "3": {
+    north: require("../../assets/eng-floorplans/Copy_of_ENG_3RD_FLOOR_NORTH.png"),
+    south: require("../../assets/eng-floorplans/Copy_of_ENG_3RD_FLOOR_SOUTH.png"),
+  },
+  "4": {
+    north: require("../../assets/eng-floorplans/Copy_of_ENG_4TH_FLOOR_NORTH.png"),
+    south: require("../../assets/eng-floorplans/Copy_of_ENG_4TH_FLOOR_SOUTH.png"),
+  },
+  "5": {
+    north: require("../../assets/eng-floorplans/Copy_of_ENG_5TH_FLOOR_NORTH.png"),
+    south: require("../../assets/eng-floorplans/Copy_of_ENG_5TH_FLOOR_SOUTH.png"),
+  },
+};
+
+const FLOOR_PLAN_NODE_ANCHORS: Partial<
+  Record<string, { sheet: "north" | "south" | "combined"; x: number; y: number }>
+> = {
+  ENG103: { sheet: "north", x: 58, y: 44 },
+  "1_EAST": { sheet: "north", x: 56, y: 39 },
+  "1_CENTER": { sheet: "north", x: 45, y: 37 },
+  "1_STAIR": { sheet: "north", x: 42, y: 31 },
+  "2_STAIR": { sheet: "south", x: 65, y: 53 },
+  "2_CENTER": { sheet: "south", x: 59, y: 46 },
+  "2_SOUTHCENTER": { sheet: "south", x: 56, y: 66 },
+  "2_SOUTHWEST": { sheet: "south", x: 35, y: 66 },
+  ENG201: { sheet: "south", x: 26, y: 65 },
+  ENG203: { sheet: "south", x: 44, y: 66 },
+  ENG209: { sheet: "south", x: 63, y: 66 },
 };
 
 function shadeHex(hex: string, amount: number) {
@@ -261,6 +308,155 @@ function destinationGroups() {
   })).filter((group) => group.rooms.length > 0);
 }
 
+function planSheetForPoint(floorId: DemoFloorId, point?: { x: number; y: number; floorId: DemoFloorId }) {
+  const plan = FLOOR_PLAN_IMAGES[floorId];
+  if (!plan) {
+    return undefined;
+  }
+  if (plan.combined) {
+    return { image: plan.combined, sheet: "combined" as const };
+  }
+  const useNorth = (point?.y ?? 50) < 36;
+  return useNorth
+    ? { image: plan.north ?? plan.south, sheet: "north" as const }
+    : { image: plan.south ?? plan.north, sheet: "south" as const };
+}
+
+function planRoutePoints(
+  routePoints: { x: number; y: number; floorId: DemoFloorId }[],
+  floorId: DemoFloorId,
+  sheet: "north" | "south" | "combined"
+) {
+  return routePoints
+    .filter((point) => point.floorId === floorId)
+    .filter((point) => sheet === "combined" || (sheet === "north" ? point.y < 36 : point.y >= 36))
+    .map((point) => {
+      const normalizedX = Math.max(4, Math.min(96, point.x));
+      const normalizedY =
+        sheet === "combined"
+          ? Math.max(4, Math.min(96, point.y))
+          : sheet === "north"
+            ? Math.max(6, Math.min(94, (point.y / 36) * 100))
+            : Math.max(6, Math.min(94, ((point.y - 36) / 40) * 100));
+      return `${normalizedX},${normalizedY}`;
+    })
+    .join(" ");
+}
+
+function anchoredPlanRoutePoints(
+  nodePath: DemoNode[],
+  floorId: DemoFloorId,
+  sheet: "north" | "south" | "combined"
+) {
+  return nodePath
+    .filter((node) => node.floorId === floorId)
+    .map((node) => FLOOR_PLAN_NODE_ANCHORS[node.id])
+    .filter((anchor): anchor is { sheet: "north" | "south" | "combined"; x: number; y: number } => Boolean(anchor))
+    .filter((anchor) => sheet === "combined" || anchor.sheet === sheet)
+    .map((anchor) => `${anchor.x},${anchor.y}`)
+    .join(" ");
+}
+
+function planMarkerPoint(
+  point: { x: number; y: number; floorId: DemoFloorId } | undefined,
+  floorId: DemoFloorId,
+  sheet: "north" | "south" | "combined"
+) {
+  if (!point || point.floorId !== floorId) {
+    return undefined;
+  }
+  if (sheet !== "combined") {
+    const inSheet = sheet === "north" ? point.y < 36 : point.y >= 36;
+    if (!inSheet) {
+      return undefined;
+    }
+  }
+
+  return {
+    x: Math.max(4, Math.min(96, point.x)),
+    y:
+      sheet === "combined"
+        ? Math.max(4, Math.min(96, point.y))
+        : sheet === "north"
+          ? Math.max(6, Math.min(94, (point.y / 36) * 100))
+          : Math.max(6, Math.min(94, ((point.y - 36) / 40) * 100)),
+  };
+}
+
+function FloorPlanScene({
+  routePoints,
+  nodePath,
+  currentPoint,
+  activeFloorId,
+}: {
+  routePoints: { x: number; y: number; floorId: DemoFloorId }[];
+  nodePath: DemoNode[];
+  currentPoint?: { x: number; y: number; floorId: DemoFloorId };
+  activeFloorId: DemoFloorId;
+}) {
+  const plan = planSheetForPoint(activeFloorId, currentPoint);
+  if (!plan?.image) {
+    return (
+      <View style={styles.sceneCard}>
+        <View style={styles.floorPlanFallback}>
+          <Text style={styles.floorPlanFallbackText}>No floor plan image available for {getFloorMeta(activeFloorId).label}.</Text>
+        </View>
+      </View>
+    );
+  }
+
+  const routePolyline =
+    anchoredPlanRoutePoints(nodePath, activeFloorId, plan.sheet) ||
+    planRoutePoints(routePoints, activeFloorId, plan.sheet);
+  const marker = planMarkerPoint(currentPoint, activeFloorId, plan.sheet);
+  const floorRoutePoints = routePoints.filter((point) => point.floorId === activeFloorId);
+  const startMarker = planMarkerPoint(floorRoutePoints[0], activeFloorId, plan.sheet);
+  const endMarker = planMarkerPoint(floorRoutePoints[floorRoutePoints.length - 1], activeFloorId, plan.sheet);
+
+  return (
+    <View style={styles.floorPlanCard}>
+      <ImageBackground source={plan.image} resizeMode="contain" style={styles.floorPlanCanvas} imageStyle={styles.floorPlanImage}>
+        <Svg viewBox="0 0 100 100" style={styles.floorPlanOverlay}>
+          {routePolyline.length > 0 && (
+            <>
+              <Polyline
+                points={routePolyline}
+                fill="none"
+                stroke="rgba(37,99,235,0.2)"
+                strokeWidth={3.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <Polyline
+                points={routePolyline}
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth={1.9}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </>
+          )}
+          {startMarker && <Circle cx={startMarker.x} cy={startMarker.y} r={2.3} fill="#10b981" stroke="#ffffff" strokeWidth={0.8} />}
+          {endMarker && <Circle cx={endMarker.x} cy={endMarker.y} r={2.5} fill="#f59e0b" stroke="#ffffff" strokeWidth={0.8} />}
+          {marker && (
+            <>
+              <Circle cx={marker.x} cy={marker.y} r={4.5} fill="rgba(37,99,235,0.14)" />
+              <Circle cx={marker.x} cy={marker.y} r={2.1} fill="#2563eb" stroke="#ffffff" strokeWidth={0.9} />
+            </>
+          )}
+        </Svg>
+        <View style={styles.floorPlanBadge}>
+          <Text style={styles.floorPlanBadgeTitle}>{getFloorMeta(activeFloorId).label}</Text>
+          <Text style={styles.floorPlanBadgeText}>
+            {plan.sheet === "combined" ? "Combined plan" : `${plan.sheet === "north" ? "North" : "South"} sheet from PDF`}
+          </Text>
+        </View>
+      </ImageBackground>
+    </View>
+  );
+}
+
 function BuildingScene({
   destinationId,
   routePoints,
@@ -387,6 +583,7 @@ function NavigatorScene({
     : activeFloorId === destinationRoom.floorId
       ? `Continue to ${destinationRoom.label}`
       : `Head to main stairs from ${startRoom.label}`;
+  const arrivalBadgeText = hasArrived ? "You have arrived" : "Follow the route";
   const guideRooms = DEMO_ROOMS
     .filter((room) => room.floorId === activeFloorId)
     .sort((a, b) => a.y - b.y || a.x - b.x);
@@ -411,6 +608,8 @@ function NavigatorScene({
     x: forward.y,
     y: -forward.x,
   };
+  const cameraCenterX = 180;
+  const cameraCenterY = 312;
   const cameraScale = 5.5;
   const floorBaseZ = levelZ(activeFloorId);
   const projectGuide = (x: number, y: number, z: number) => {
@@ -637,7 +836,7 @@ export default function NavigationScreen() {
   const [destinationId, setDestinationId] = useState("ENG201");
   const [frameIndex, setFrameIndex] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
-  const [viewMode, setViewMode] = useState<"stack" | "single" | "guide">("stack");
+  const [viewMode, setViewMode] = useState<"stack" | "single" | "guide" | "plan">("stack");
   const [selectedFloorId, setSelectedFloorId] = useState<DemoFloorId>("1");
 
   const route = useMemo(() => getNavigationDemoRoute(destinationId), [destinationId]);
@@ -854,9 +1053,17 @@ export default function NavigationScreen() {
               Navigate
             </Text>
           </Pressable>
+          <Pressable
+            style={[styles.modeButton, viewMode === "plan" && styles.modeButtonActive]}
+            onPress={() => setViewMode("plan")}
+          >
+            <Text style={[styles.modeButtonText, viewMode === "plan" && styles.modeButtonTextActive]}>
+              Floor plan
+            </Text>
+          </Pressable>
         </View>
 
-        {viewMode === "single" && (
+        {(viewMode === "single" || viewMode === "plan") && (
           <View style={styles.singleFloorPanel}>
             <Text style={styles.singleFloorTitle}>Choose level</Text>
             <View style={styles.singleFloorRow}>
@@ -892,7 +1099,7 @@ export default function NavigationScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>
-          {viewMode === "guide" ? "Guidance view" : "3D navigation scene"}
+          {viewMode === "guide" ? "Guidance view" : viewMode === "plan" ? "Floor plan view" : "3D navigation scene"}
         </Text>
         {viewMode === "guide" ? (
           <NavigatorScene
@@ -903,6 +1110,13 @@ export default function NavigationScreen() {
             startRoom={startRoom}
             hasArrived={hasArrived}
             estimatedMinutes={estimatedMinutes}
+          />
+        ) : viewMode === "plan" ? (
+          <FloorPlanScene
+            routePoints={routePoints}
+            nodePath={route.nodePath}
+            currentPoint={currentPoint}
+            activeFloorId={selectedFloorId}
           />
         ) : (
           <BuildingScene
@@ -1377,6 +1591,58 @@ const styles = StyleSheet.create({
   sceneSvg: {
     width: "100%",
     height: 420,
+  },
+  floorPlanCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 28,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#dde3f4",
+    shadowColor: "#1f2d86",
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
+  },
+  floorPlanCanvas: {
+    width: "100%",
+    height: 520,
+    justifyContent: "flex-end",
+  },
+  floorPlanImage: {
+    resizeMode: "contain",
+  },
+  floorPlanOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  floorPlanBadge: {
+    margin: 16,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(11,18,39,0.78)",
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  floorPlanBadgeTitle: {
+    color: "#ffffff",
+    fontWeight: "800",
+    fontSize: 15,
+  },
+  floorPlanBadgeText: {
+    color: "#cbd5e1",
+    marginTop: 2,
+    fontSize: 12,
+  },
+  floorPlanFallback: {
+    height: 220,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  floorPlanFallbackText: {
+    color: "#475569",
+    textAlign: "center",
+    lineHeight: 22,
   },
   stepsCard: {
     backgroundColor: "#ffffff",
