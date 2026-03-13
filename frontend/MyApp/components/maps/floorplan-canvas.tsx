@@ -1,20 +1,29 @@
 import { Image as ExpoImage } from 'expo-image';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LayoutChangeEvent, Image as RNImage, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
 import type { AnchorPoint } from '@/types/fingerprint';
+
+const FOLLOW_ZOOM = 2.5;
 
 type Props = {
   imageSource: any;
   points: AnchorPoint[];
   liveDot?: { xNorm: number; yNorm: number } | null;
+  destinationDot?: { xNorm: number; yNorm: number } | null;
   selectedPointId?: string | null;
   canAddPoint?: boolean;
   onAddPoint?: (xNorm: number, yNorm: number) => void;
   dragPointId?: string | null;
   onDragPoint?: (pointId: string, xNorm: number, yNorm: number) => void;
+  /** When true the camera smoothly tracks liveDot as it moves. */
+  followDot?: boolean;
+  /** Called when the user manually pans or pinches, breaking auto-follow. */
+  onUserInteraction?: () => void;
+  /** Increment to trigger an animated re-center on liveDot. */
+  recenterTrigger?: number;
 };
 
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
@@ -24,10 +33,14 @@ export function FloorplanCanvas({
   points,
   selectedPointId,
   liveDot,
+  destinationDot,
   canAddPoint = false,
   onAddPoint,
   dragPointId,
   onDragPoint,
+  followDot = false,
+  onUserInteraction,
+  recenterTrigger,
 }: Props) {
   const [size, setSize] = useState({ w: 1, h: 1 });
   const scale = useSharedValue(1);
@@ -44,16 +57,43 @@ export function FloorplanCanvas({
   const baseH = viewRatio > imageRatio ? size.h : size.w / imageRatio;
   const maxScale = Math.max(1, Math.min(8, Math.min(asset.width / baseW, asset.height / baseH)));
 
+  // ── Camera follow: animate to keep liveDot centered when followDot is on ──
+  useEffect(() => {
+    if (!liveDot || !followDot || size.w <= 1) return;
+    const targetZoom = Math.min(maxScale, Math.max(FOLLOW_ZOOM, scale.value));
+    const targetTx = -(liveDot.xNorm * baseW - baseW / 2) * targetZoom;
+    const targetTy = -(liveDot.yNorm * baseH - baseH / 2) * targetZoom;
+    scale.value = withTiming(targetZoom, { duration: 350 });
+    tx.value = withTiming(targetTx, { duration: 350 });
+    ty.value = withTiming(targetTy, { duration: 350 });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveDot?.xNorm, liveDot?.yNorm, followDot, size.w]);
+
+  // ── Recenter trigger: snap back to liveDot with a spring ──
+  useEffect(() => {
+    if (recenterTrigger == null || !liveDot || size.w <= 1) return;
+    const targetZoom = Math.min(maxScale, Math.max(FOLLOW_ZOOM, scale.value));
+    const targetTx = -(liveDot.xNorm * baseW - baseW / 2) * targetZoom;
+    const targetTy = -(liveDot.yNorm * baseH - baseH / 2) * targetZoom;
+    scale.value = withSpring(targetZoom, { damping: 18, stiffness: 160 });
+    tx.value = withSpring(targetTx, { damping: 18, stiffness: 160 });
+    ty.value = withSpring(targetTy, { damping: 18, stiffness: 160 });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recenterTrigger]);
+
   const mapStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
   }));
 
   const markerStyle = useAnimatedStyle(() => ({ transform: [{ scale: 1 / scale.value }] }));
 
+  const notifyInteraction = () => { if (onUserInteraction) onUserInteraction(); };
+
   const panMap = Gesture.Pan()
     .onStart(() => {
       startTx.value = tx.value;
       startTy.value = ty.value;
+      runOnJS(notifyInteraction)();
     })
     .onUpdate((e) => {
       tx.value = startTx.value + e.translationX;
@@ -63,6 +103,7 @@ export function FloorplanCanvas({
   const pinch = Gesture.Pinch()
     .onStart(() => {
       startScale.value = scale.value;
+      runOnJS(notifyInteraction)();
     })
     .onUpdate((e) => {
       scale.value = Math.max(0.7, Math.min(maxScale, startScale.value * e.scale));
@@ -126,6 +167,13 @@ export function FloorplanCanvas({
                 <Animated.View style={[styles.liveDot, markerStyle]} />
               </View>
             ) : null}
+            {destinationDot ? (
+              <View style={[styles.markerSlot, { left: destinationDot.xNorm * baseW - 14, top: destinationDot.yNorm * baseH - 14 }]}>
+                <Animated.View style={[styles.destinationPin, markerStyle]}>
+                  <View style={styles.destinationPinInner} />
+                </Animated.View>
+              </View>
+            ) : null}
           </Animated.View>
         </Animated.View>
       </GestureDetector>
@@ -154,5 +202,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#2563eb',
     borderWidth: 2,
     borderColor: '#bfdbfe',
+  },
+  destinationPin: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#ef4444',
+    borderWidth: 3,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  destinationPinInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
   },
 });
