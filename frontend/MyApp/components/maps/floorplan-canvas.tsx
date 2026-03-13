@@ -1,5 +1,6 @@
+import { Image as ExpoImage } from 'expo-image';
 import React, { useState } from 'react';
-import { Image, LayoutChangeEvent, StyleSheet, View } from 'react-native';
+import { LayoutChangeEvent, Image as RNImage, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
@@ -36,11 +37,12 @@ export function FloorplanCanvas({
   const startTx = useSharedValue(0);
   const startTy = useSharedValue(0);
 
-  const asset = Image.resolveAssetSource(imageSource);
+  const asset = RNImage.resolveAssetSource(imageSource);
   const imageRatio = asset.width / asset.height;
   const viewRatio = size.w / size.h;
   const baseW = viewRatio > imageRatio ? size.h * imageRatio : size.w;
   const baseH = viewRatio > imageRatio ? size.h : size.w / imageRatio;
+  const maxScale = Math.max(1, Math.min(8, Math.min(asset.width / baseW, asset.height / baseH)));
 
   const mapStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
@@ -63,7 +65,7 @@ export function FloorplanCanvas({
       startScale.value = scale.value;
     })
     .onUpdate((e) => {
-      scale.value = Math.max(0.7, Math.min(5, startScale.value * e.scale));
+      scale.value = Math.max(0.7, Math.min(maxScale, startScale.value * e.scale));
     });
 
   const toNorm = (x: number, y: number) => {
@@ -106,7 +108,14 @@ export function FloorplanCanvas({
               { width: baseW, height: baseH, marginLeft: -baseW / 2, marginTop: -baseH / 2 },
               mapStyle,
             ]}>
-            <Image source={imageSource} style={{ width: baseW, height: baseH }} resizeMode="contain" />
+            <ExpoImage
+              source={imageSource}
+              style={{ width: baseW, height: baseH }}
+              contentFit="contain"
+              contentPosition="center"
+              allowDownscaling={false}
+              transition={0}
+            />
             {points.map((p) => (
               <View key={p.id} style={[styles.markerSlot, { left: p.xNorm * baseW - 9, top: p.yNorm * baseH - 9 }]}>
                 <Animated.View style={[styles.marker, p.id === selectedPointId && styles.markerSelected, markerStyle]} />
