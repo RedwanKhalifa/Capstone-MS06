@@ -420,8 +420,8 @@ function NavigatorScene({
     const localY = dx * forward.x + dy * forward.y;
 
     return {
-      x: 180 + localX * 8.6,
-      y: 318 - localY * cameraScale - z * 1.65,
+      x: cameraCenterX + localX * 8.8,
+      y: cameraCenterY - localY * cameraScale - z * 1.58,
     };
   };
   const extrudeGuideBox = (
@@ -491,17 +491,23 @@ function NavigatorScene({
   return (
     <View style={styles.navigatorShell}>
       <View style={styles.navigatorHeader}>
-        <Text style={styles.navigatorDistance}>{estimatedMinutes} min</Text>
-        <Text style={styles.navigatorInstruction}>{currentInstruction}</Text>
-        <View style={styles.navigatorExitPill}>
-          <Text style={styles.navigatorExitText}>{getFloorMeta(activeFloorId).label}</Text>
+        <View style={styles.navigatorHeaderTop}>
+          <View>
+            <Text style={styles.navigatorEyebrow}>Indoor Navigation</Text>
+            <Text style={styles.navigatorDistance}>{estimatedMinutes} min</Text>
+          </View>
+          <View style={styles.navigatorExitPill}>
+            <Text style={styles.navigatorExitText}>{getFloorMeta(activeFloorId).label}</Text>
+          </View>
         </View>
+        <Text style={styles.navigatorInstruction}>{currentInstruction}</Text>
+        <Text style={styles.navigatorSubtext}>{arrivalBadgeText}</Text>
       </View>
 
       <View style={styles.navigatorMapCard}>
         <Svg viewBox="0 0 360 420" style={styles.navigatorOverlay}>
-          <Rect x={0} y={0} width={360} height={420} fill="#e7ecf3" />
-          <Rect x={0} y={0} width={360} height={170} fill="#f7f9fc" />
+          <Rect x={0} y={0} width={360} height={420} fill="#edf2fa" />
+          <Rect x={0} y={0} width={360} height={110} fill="#f8fbff" />
 
           <Polygon points={polygonString(guideFloorSlab.left)} fill="#d0d8e8" />
           <Polygon points={polygonString(guideFloorSlab.right)} fill="#c6cfdf" />
@@ -531,6 +537,7 @@ function NavigatorScene({
               room.y + room.height / 2,
               bottomZ + ROOM_HEIGHT + 5
             );
+            const labelVisible = isStart || isDestination || (Math.abs(room.localX) < 28 && room.localY > -8 && room.localY < 48);
 
             return (
               <React.Fragment key={`guide-${room.id}`}>
@@ -554,14 +561,24 @@ function NavigatorScene({
           })}
 
           {routeOnFloor.length > 1 && (
-            <Polyline
-              points={guideRoute}
-              fill="none"
-              stroke="#2563eb"
-              strokeWidth={5.4}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+            <>
+              <Polyline
+                points={guideRoutePath}
+                fill="none"
+                stroke="rgba(37,99,235,0.2)"
+                strokeWidth={14}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <Polyline
+                points={guideRoutePath}
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth={6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </>
           )}
 
           {routeOnFloor[0] && (() => {
@@ -1257,36 +1274,60 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   navigatorShell: {
-    backgroundColor: "#0f172a",
+    backgroundColor: "#091224",
     borderRadius: 28,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#1e293b",
+    borderColor: "#16233c",
+    shadowColor: "#0f172a",
+    shadowOpacity: 0.2,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 8,
   },
   navigatorHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 14,
-    backgroundColor: "#111827",
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 16,
+    backgroundColor: "#0b162c",
+  },
+  navigatorHeaderTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  navigatorEyebrow: {
+    color: "#6fb7ff",
+    fontSize: 11,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
   navigatorDistance: {
     color: "#ffffff",
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: "800",
+    marginTop: 4,
   },
   navigatorInstruction: {
-    color: "#dbe4ff",
-    marginTop: 4,
+    color: "#eff4ff",
+    marginTop: 6,
     fontSize: 16,
     fontWeight: "700",
   },
+  navigatorSubtext: {
+    color: "#75b7ff",
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: "700",
+  },
   navigatorExitPill: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    backgroundColor: "#374151",
-    borderRadius: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   navigatorExitText: {
     color: "#ffffff",
@@ -1294,7 +1335,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   navigatorMapCard: {
-    backgroundColor: "#e5e7eb",
+    backgroundColor: "#edf2fa",
     height: 420,
   },
   navigatorOverlay: {
@@ -1305,7 +1346,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingVertical: 14,
+    paddingVertical: 16,
     backgroundColor: "#ffffff",
   },
   navigatorMetric: {
