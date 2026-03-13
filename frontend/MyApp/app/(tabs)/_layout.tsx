@@ -49,6 +49,16 @@ export default function TabsLayout() {
           ),
         }}
       />
+
+      <Tabs.Screen
+        name="live"
+        options={{
+          title: "Live",
+          tabBarIcon: ({ color }) => (
+            <IconSymbol name="dot.radiowaves.left.and.right" color={color} size={28} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

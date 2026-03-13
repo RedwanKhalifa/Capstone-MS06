@@ -1,3 +1,5 @@
+import { DXF_FLOOR_FEATURES } from "./generated-eng-dxf";
+
 export type DemoFloorId = "B" | "LG" | "1" | "2" | "3" | "4" | "5";
 
 export type DemoFloor = {
@@ -6,6 +8,8 @@ export type DemoFloor = {
   shortLabel: string;
   levelIndex: number;
 };
+
+export type DemoRoomCategory = "lecture" | "lab" | "office" | "stairs" | "service";
 
 export type DemoRoom = {
   id: string;
@@ -17,7 +21,7 @@ export type DemoRoom = {
   height: number;
   color: string;
   connectTo: string;
-  category?: "lecture" | "lab" | "office" | "stairs" | "service";
+  category?: DemoRoomCategory;
 };
 
 export type DemoNode = {
@@ -27,6 +31,17 @@ export type DemoNode = {
   y: number;
   label: string;
   kind: "room" | "hall" | "stairs";
+};
+
+export type DemoPlanPoint = {
+  x: number;
+  y: number;
+};
+
+export type DemoFloorFeature = {
+  fill: string;
+  stroke?: string;
+  points: DemoPlanPoint[];
 };
 
 export type DemoRoutePoint = {
@@ -58,11 +73,12 @@ type Edge = {
   weight: number;
 };
 
-const ROOM_COLORS = {
+const ROOM_COLORS: Record<DemoRoomCategory, string> = {
   office: "#a8c5ff",
   lecture: "#f6d26b",
   lab: "#87d3c6",
   service: "#b9b8ff",
+  stairs: "#d7b47b",
 };
 
 export const FLOORS: DemoFloor[] = [
@@ -75,6 +91,61 @@ export const FLOORS: DemoFloor[] = [
   { id: "5", label: "Floor 5", shortLabel: "5", levelIndex: 5 },
 ];
 
+const BASE_FLOOR_FEATURES: Record<DemoFloorId, DemoFloorFeature[]> = {
+  B: [
+    { fill: "#e7edf6", points: [{ x: 14, y: 10 }, { x: 94, y: 10 }, { x: 94, y: 78 }, { x: 14, y: 78 }] },
+    { fill: "#d8e1ee", points: [{ x: 46, y: 28 }, { x: 90, y: 28 }, { x: 90, y: 76 }, { x: 46, y: 76 }] },
+    { fill: "#d7dfec", points: [{ x: 54, y: 48 }, { x: 90, y: 48 }, { x: 90, y: 54 }, { x: 54, y: 54 }] },
+  ],
+  LG: [
+    { fill: "#e7edf6", points: [{ x: 8, y: 8 }, { x: 98, y: 8 }, { x: 98, y: 76 }, { x: 8, y: 76 }] },
+    { fill: "#d7dfec", points: [{ x: 8, y: 34 }, { x: 98, y: 34 }, { x: 98, y: 42 }, { x: 8, y: 42 }] },
+    { fill: "#dde5f1", points: [{ x: 60, y: 34 }, { x: 90, y: 34 }, { x: 90, y: 66 }, { x: 60, y: 66 }] },
+    { fill: "#dce4f1", points: [{ x: 18, y: 18 }, { x: 58, y: 18 }, { x: 58, y: 28 }, { x: 18, y: 28 }] },
+  ],
+  "1": [
+    { fill: "#e7edf6", points: [{ x: 6, y: 8 }, { x: 98, y: 8 }, { x: 98, y: 76 }, { x: 6, y: 76 }] },
+    { fill: "#d7dfec", points: [{ x: 6, y: 20 }, { x: 98, y: 20 }, { x: 98, y: 28 }, { x: 6, y: 28 }] },
+    { fill: "#dce5f2", points: [{ x: 52, y: 9 }, { x: 60, y: 9 }, { x: 60, y: 44 }, { x: 52, y: 44 }] },
+    { fill: "#dbe4f0", points: [{ x: 24, y: 36 }, { x: 68, y: 36 }, { x: 68, y: 42 }, { x: 24, y: 42 }] },
+    { fill: "#dce4f1", points: [{ x: 68, y: 20 }, { x: 98, y: 20 }, { x: 98, y: 74 }, { x: 68, y: 74 }] },
+  ],
+  "2": [
+    { fill: "#e7edf6", points: [{ x: 4, y: 8 }, { x: 98, y: 8 }, { x: 98, y: 76 }, { x: 4, y: 76 }] },
+    { fill: "#d7dfec", points: [{ x: 4, y: 20 }, { x: 98, y: 20 }, { x: 98, y: 28 }, { x: 4, y: 28 }] },
+    { fill: "#dce4f1", points: [{ x: 52, y: 9 }, { x: 60, y: 9 }, { x: 60, y: 40 }, { x: 52, y: 40 }] },
+    { fill: "#d9e2ef", points: [{ x: 16, y: 36 }, { x: 80, y: 36 }, { x: 80, y: 42 }, { x: 16, y: 42 }] },
+    { fill: "#dbe4f1", points: [{ x: 76, y: 18 }, { x: 98, y: 18 }, { x: 98, y: 70 }, { x: 76, y: 70 }] },
+  ],
+  "3": [
+    { fill: "#e7edf6", points: [{ x: 4, y: 8 }, { x: 98, y: 8 }, { x: 98, y: 76 }, { x: 4, y: 76 }] },
+    { fill: "#d8e0ed", points: [{ x: 4, y: 24 }, { x: 98, y: 24 }, { x: 98, y: 32 }, { x: 4, y: 32 }] },
+    { fill: "#dbe4f1", points: [{ x: 66, y: 10 }, { x: 98, y: 10 }, { x: 98, y: 40 }, { x: 66, y: 40 }] },
+    { fill: "#dbe4f0", points: [{ x: 10, y: 38 }, { x: 92, y: 38 }, { x: 92, y: 44 }, { x: 10, y: 44 }] },
+  ],
+  "4": [
+    { fill: "#e7edf6", points: [{ x: 4, y: 10 }, { x: 98, y: 10 }, { x: 98, y: 76 }, { x: 4, y: 76 }] },
+    { fill: "#d8e0ed", points: [{ x: 4, y: 24 }, { x: 98, y: 24 }, { x: 98, y: 32 }, { x: 4, y: 32 }] },
+    { fill: "#dbe3f0", points: [{ x: 68, y: 12 }, { x: 98, y: 12 }, { x: 98, y: 40 }, { x: 68, y: 40 }] },
+    { fill: "#dbe4f0", points: [{ x: 10, y: 38 }, { x: 96, y: 38 }, { x: 96, y: 44 }, { x: 10, y: 44 }] },
+  ],
+  "5": [
+    { fill: "#e7edf6", points: [{ x: 10, y: 14 }, { x: 98, y: 14 }, { x: 98, y: 72 }, { x: 10, y: 72 }] },
+    { fill: "#d8e0ed", points: [{ x: 10, y: 34 }, { x: 98, y: 34 }, { x: 98, y: 42 }, { x: 10, y: 42 }] },
+    { fill: "#dce4f1", points: [{ x: 54, y: 14 }, { x: 98, y: 14 }, { x: 98, y: 66 }, { x: 54, y: 66 }] },
+  ],
+};
+
+export const FLOOR_FEATURES: Record<DemoFloorId, DemoFloorFeature[]> = {
+  B: BASE_FLOOR_FEATURES.B,
+  LG: BASE_FLOOR_FEATURES.LG,
+  "1": [...BASE_FLOOR_FEATURES["1"], ...((DXF_FLOOR_FEATURES["1"] as unknown as DemoFloorFeature[] | undefined) ?? [])],
+  "2": [...BASE_FLOOR_FEATURES["2"], ...((DXF_FLOOR_FEATURES["2"] as unknown as DemoFloorFeature[] | undefined) ?? [])],
+  "3": [...BASE_FLOOR_FEATURES["3"], ...((DXF_FLOOR_FEATURES["3"] as unknown as DemoFloorFeature[] | undefined) ?? [])],
+  "4": [...BASE_FLOOR_FEATURES["4"], ...((DXF_FLOOR_FEATURES["4"] as unknown as DemoFloorFeature[] | undefined) ?? [])],
+  "5": [...BASE_FLOOR_FEATURES["5"], ...((DXF_FLOOR_FEATURES["5"] as unknown as DemoFloorFeature[] | undefined) ?? [])],
+};
+
 export const NAVIGATION_START_ROOM_ID = "ENG103";
 
 function createRoom(
@@ -85,7 +156,7 @@ function createRoom(
   width: number,
   height: number,
   connectTo: string,
-  category: DemoRoom["category"] = "office"
+  category: DemoRoomCategory = "office"
 ): DemoRoom {
   return {
     id: label,
@@ -97,124 +168,93 @@ function createRoom(
     height,
     connectTo,
     category,
-    color: ROOM_COLORS[category ?? "office"],
+    color: ROOM_COLORS[category],
   };
 }
 
-const floorNorthBand = (
-  floorId: DemoFloorId,
-  rooms: Array<[string, number, number, string]>
-) => rooms.map(([label, x, width, connectTo]) => createRoom(label, floorId, x, 12, width, 9, connectTo, "office"));
-
-const floorSouthBand = (
-  floorId: DemoFloorId,
-  rooms: Array<[string, number, number, string, DemoRoom["category"]?]>
-) => rooms.map(([label, x, width, connectTo, category]) => createRoom(label, floorId, x, 52, width, 15, connectTo, category ?? "lab"));
-
 export const DEMO_ROOMS: DemoRoom[] = [
-  createRoom("ENG B1", "B", 16, 48, 16, 16, "B_WEST", "service"),
-  createRoom("ENG B2", "B", 38, 48, 18, 16, "B_CENTER", "service"),
-  createRoom("ENG B9", "B", 60, 48, 18, 16, "B_CENTER", "lab"),
-  createRoom("ENG B10", "B", 18, 28, 18, 12, "B_WEST", "service"),
-  createRoom("ENG B17", "B", 80, 44, 14, 20, "B_EAST", "lab"),
+  createRoom("ENG B1", "B", 18, 16, 10, 12, "B_WEST", "service"),
+  createRoom("ENG B2", "B", 56, 16, 14, 10, "B_CENTER", "service"),
+  createRoom("ENG B9", "B", 72, 16, 18, 10, "B_EAST", "lab"),
+  createRoom("ENG B10", "B", 48, 34, 24, 16, "B_CENTER", "service"),
+  createRoom("STAIRS B", "B", 72, 36, 8, 10, "B_STAIR", "stairs"),
+  createRoom("ENG B17", "B", 50, 54, 32, 18, "B_SOUTHCENTER", "lab"),
 
-  ...floorNorthBand("LG", [
-    ["ENG LG 4", 10, 12, "LG_WEST"],
-    ["ENG LG 6", 24, 12, "LG_WEST"],
-    ["ENG LG 9", 38, 12, "LG_CENTER"],
-    ["ENG LG 14", 56, 14, "LG_CENTER"],
-    ["ENG LG 18", 74, 14, "LG_EAST"],
-  ]),
-  ...floorSouthBand("LG", [
-    ["ENG LG 24", 12, 18, "LG_WEST", "lecture"],
-    ["ENG LG 29", 34, 16, "LG_CENTER", "lecture"],
-    ["ENG LG 32", 54, 18, "LG_CENTER", "lecture"],
-    ["ENG LG 44", 76, 18, "LG_EAST", "lab"],
-    ["ENG LG 53", 56, 34, "LG_EAST", "lab"],
-  ]),
+  createRoom("ENG LG 4", "LG", 10, 12, 18, 20, "LG_WEST", "lecture"),
+  createRoom("ENG LG 6", "LG", 30, 12, 18, 20, "LG_CENTER", "lecture"),
+  createRoom("ENG LG 9", "LG", 54, 10, 22, 22, "LG_CENTER", "service"),
+  createRoom("ENG LG 14", "LG", 78, 10, 16, 22, "LG_EAST", "lecture"),
+  createRoom("STAIRS LG", "LG", 50, 20, 8, 12, "LG_STAIR", "stairs"),
+  createRoom("ENG LG 24", "LG", 26, 44, 18, 18, "LG_SOUTHWEST", "lecture"),
+  createRoom("ENG LG 29", "LG", 46, 44, 18, 18, "LG_SOUTHCENTER", "lecture"),
+  createRoom("ENG LG 32", "LG", 66, 48, 28, 16, "LG_EAST", "lecture"),
+  createRoom("ENG LG 44", "LG", 6, 48, 16, 18, "LG_WEST", "lab"),
+  createRoom("ENG LG 53", "LG", 56, 64, 38, 10, "LG_EAST", "lab"),
 
-  ...floorNorthBand("1", [
-    ["ENG116", 8, 10, "1_WEST"],
-    ["ENG120", 20, 10, "1_WEST"],
-    ["ENG126", 32, 10, "1_CENTER"],
-    ["ENG130", 44, 10, "1_CENTER"],
-    ["ENG137", 64, 10, "1_EAST"],
-    ["ENG140", 76, 10, "1_EAST"],
-    ["ENG144", 88, 8, "1_EAST"],
-  ]),
-  ...floorSouthBand("1", [
-    ["ENG101", 12, 16, "1_SOUTHWEST", "lecture"],
-    ["ENG103", 32, 16, "1_SOUTHCENTER", "lecture"],
-    ["ENG105", 52, 16, "1_SOUTHCENTER", "lecture"],
-    ["ENG109", 74, 20, "1_EAST", "lecture"],
-    ["ENG112", 78, 30, "1_EAST", "lab"],
-    ["ENG182", 60, 10, "1_CENTER", "service"],
-  ]),
+  createRoom("ENG116", "1", 8, 10, 8, 8, "1_WEST", "office"),
+  createRoom("ENG120", "1", 18, 10, 8, 8, "1_WEST", "office"),
+  createRoom("ENG126", "1", 30, 10, 8, 8, "1_CENTER", "office"),
+  createRoom("ENG130", "1", 40, 10, 8, 8, "1_CENTER", "office"),
+  createRoom("STAIRS 1", "1", 52, 11, 8, 10, "1_STAIR", "stairs"),
+  createRoom("ENG137", "1", 66, 10, 8, 8, "1_EAST", "office"),
+  createRoom("ENG140", "1", 76, 10, 8, 8, "1_EAST", "office"),
+  createRoom("ENG144", "1", 86, 10, 8, 8, "1_EAST", "office"),
+  createRoom("ENG109", "1", 10, 24, 15, 16, "1_WEST", "lecture"),
+  createRoom("ENG101", "1", 28, 41, 18, 16, "1_SOUTHWEST", "lecture"),
+  createRoom("ENG105", "1", 48, 41, 18, 16, "1_SOUTHCENTER", "lecture"),
+  createRoom("ENG182", "1", 56, 28, 7, 12, "1_STAIR", "service"),
+  createRoom("ENG103", "1", 71, 23, 25, 24, "1_EAST", "lecture"),
+  createRoom("ENG112", "1", 71, 50, 25, 22, "1_EAST", "lab"),
 
-  ...floorNorthBand("2", [
-    ["ENG220", 8, 10, "2_WEST"],
-    ["ENG224", 20, 10, "2_WEST"],
-    ["ENG229", 32, 10, "2_CENTER"],
-    ["ENG235", 44, 10, "2_CENTER"],
-    ["ENG243", 64, 10, "2_EAST"],
-    ["ENG248", 76, 10, "2_EAST"],
-    ["ENG257", 88, 8, "2_EAST"],
-  ]),
-  ...floorSouthBand("2", [
-    ["ENG201", 12, 16, "2_SOUTHWEST", "lab"],
-    ["ENG203", 32, 16, "2_SOUTHCENTER", "lab"],
-    ["ENG209", 52, 16, "2_SOUTHCENTER", "lab"],
-    ["ENG217", 74, 20, "2_EAST", "lab"],
-    ["ENG239", 58, 12, "2_CENTER", "service"],
-    ["ENG270", 44, 10, "2_CENTER", "office"],
-    ["ENG290", 6, 12, "2_WEST", "office"],
-  ]),
+  createRoom("ENG290", "2", 4, 22, 10, 14, "2_WEST", "office"),
+  createRoom("STAIRS 2", "2", 52, 13, 8, 10, "2_STAIR", "stairs"),
+  createRoom("ENG270", "2", 44, 18, 12, 8, "2_CENTER", "office"),
+  createRoom("ENG243", "2", 18, 10, 8, 8, "2_WEST", "office"),
+  createRoom("ENG248", "2", 28, 10, 8, 8, "2_WEST", "office"),
+  createRoom("ENG229", "2", 48, 10, 8, 8, "2_CENTER", "office"),
+  createRoom("ENG235", "2", 58, 10, 8, 8, "2_CENTER", "office"),
+  createRoom("ENG220", "2", 76, 10, 8, 8, "2_EAST", "office"),
+  createRoom("ENG224", "2", 86, 10, 8, 8, "2_EAST", "office"),
+  createRoom("ENG239", "2", 40, 30, 12, 10, "2_CENTER", "service"),
+  createRoom("ENG201", "2", 20, 40, 18, 18, "2_SOUTHWEST", "lab"),
+  createRoom("ENG203", "2", 40, 40, 18, 18, "2_SOUTHCENTER", "lab"),
+  createRoom("ENG209", "2", 62, 42, 16, 18, "2_SOUTHCENTER", "lab"),
+  createRoom("ENG217", "2", 82, 22, 14, 24, "2_EAST", "lab"),
 
-  ...floorNorthBand("3", [
-    ["ENG319", 8, 10, "3_WEST"],
-    ["ENG326", 20, 10, "3_WEST"],
-    ["ENG330", 32, 10, "3_CENTER"],
-    ["ENG339", 44, 10, "3_CENTER"],
-    ["ENG343", 64, 10, "3_EAST"],
-    ["ENG347", 76, 10, "3_EAST"],
-    ["ENG349", 88, 8, "3_EAST"],
-  ]),
-  ...floorSouthBand("3", [
-    ["ENG301", 12, 16, "3_SOUTHWEST", "lab"],
-    ["ENG304", 32, 16, "3_SOUTHCENTER", "lab"],
-    ["ENG309", 52, 16, "3_SOUTHCENTER", "lab"],
-    ["ENG312", 74, 20, "3_EAST", "lab"],
-    ["ENG327", 56, 12, "3_CENTER", "lab"],
-    ["ENG356", 44, 10, "3_CENTER", "office"],
-    ["ENG378", 6, 12, "3_WEST", "office"],
-  ]),
+  createRoom("ENG372", "3", 4, 12, 8, 10, "3_WEST", "office"),
+  createRoom("ENG370", "3", 14, 24, 10, 12, "3_WEST", "office"),
+  createRoom("ENG360", "3", 30, 12, 22, 12, "3_CENTER", "office"),
+  createRoom("ENG356", "3", 46, 26, 16, 12, "3_CENTER", "office"),
+  createRoom("STAIRS 3", "3", 8, 44, 8, 10, "3_STAIR", "stairs"),
+  createRoom("ENG304", "3", 24, 42, 18, 22, "3_SOUTHWEST", "lab"),
+  createRoom("ENG302", "3", 44, 42, 18, 22, "3_SOUTHCENTER", "lab"),
+  createRoom("ENG320", "3", 64, 42, 18, 22, "3_SOUTHCENTER", "lab"),
+  createRoom("ENG319", "3", 84, 10, 12, 10, "3_EAST", "office"),
+  createRoom("ENG312", "3", 84, 42, 16, 24, "3_EAST", "lab"),
+  createRoom("ENG349", "3", 78, 24, 18, 12, "3_EAST", "office"),
 
-  ...floorNorthBand("4", [
-    ["ENG420", 8, 10, "4_WEST"],
-    ["ENG426", 20, 10, "4_WEST"],
-    ["ENG430", 32, 10, "4_CENTER"],
-    ["ENG439", 44, 10, "4_CENTER"],
-    ["ENG443", 64, 10, "4_EAST"],
-    ["ENG447", 76, 10, "4_EAST"],
-    ["ENG449", 88, 8, "4_EAST"],
-  ]),
-  ...floorSouthBand("4", [
-    ["ENG401", 12, 16, "4_SOUTHWEST", "lab"],
-    ["ENG403", 32, 16, "4_SOUTHCENTER", "lab"],
-    ["ENG405", 52, 16, "4_SOUTHCENTER", "lab"],
-    ["ENG413", 74, 20, "4_EAST", "lab"],
-    ["ENG417", 56, 12, "4_CENTER", "service"],
-    ["ENG440", 44, 10, "4_CENTER", "office"],
-    ["ENG470", 6, 12, "4_WEST", "office"],
-  ]),
+  createRoom("ENG470", "4", 4, 18, 10, 12, "4_WEST", "office"),
+  createRoom("STAIRS 4", "4", 8, 44, 8, 10, "4_STAIR", "stairs"),
+  createRoom("ENG420", "4", 28, 12, 12, 10, "4_CENTER", "office"),
+  createRoom("ENG440", "4", 40, 24, 16, 14, "4_CENTER", "office"),
+  createRoom("ENG443", "4", 70, 12, 10, 10, "4_EAST", "office"),
+  createRoom("ENG449", "4", 82, 12, 10, 10, "4_EAST", "office"),
+  createRoom("ENG401", "4", 22, 42, 18, 22, "4_SOUTHWEST", "lab"),
+  createRoom("ENG402", "4", 42, 42, 18, 22, "4_SOUTHCENTER", "lab"),
+  createRoom("ENG403", "4", 62, 42, 18, 22, "4_SOUTHCENTER", "lab"),
+  createRoom("ENG413", "4", 84, 42, 16, 24, "4_EAST", "lab"),
+  createRoom("ENG404", "4", 68, 18, 28, 18, "4_EAST", "service"),
 
-  createRoom("ENG501", "5", 18, 46, 18, 18, "5_WEST", "service"),
-  createRoom("ENG502", "5", 42, 46, 18, 18, "5_CENTER", "service"),
-  createRoom("ENG503", "5", 66, 46, 16, 18, "5_EAST", "service"),
-  createRoom("ENG504", "5", 82, 28, 12, 14, "5_EAST", "service"),
+  createRoom("STAIRS 5", "5", 12, 48, 8, 12, "5_STAIR", "stairs"),
+  createRoom("ENG501", "5", 34, 28, 24, 20, "5_CENTER", "service"),
+  createRoom("ENG502", "5", 70, 18, 16, 14, "5_EAST", "service"),
+  createRoom("ENG503", "5", 82, 42, 14, 16, "5_EAST", "service"),
+  createRoom("ENG504", "5", 58, 50, 18, 14, "5_CENTER", "service"),
 ];
 
-export const DESTINATION_ROOMS = DEMO_ROOMS.filter((room) => room.id !== NAVIGATION_START_ROOM_ID);
+export const DESTINATION_ROOMS = DEMO_ROOMS.filter(
+  (room) => room.id !== NAVIGATION_START_ROOM_ID && room.category !== "stairs"
+);
 
 const FLOOR_NODE_TEMPLATE: Record<string, { x: number; y: number; label: string; kind: DemoNode["kind"] }> = {
   WEST: { x: 18, y: 36, label: "West Hall", kind: "hall" },
@@ -225,15 +265,78 @@ const FLOOR_NODE_TEMPLATE: Record<string, { x: number; y: number; label: string;
   STAIR: { x: 58, y: 36, label: "Main Stairs", kind: "stairs" },
 };
 
+const FLOOR_NODE_OVERRIDES: Partial<Record<DemoFloorId, Record<string, { x: number; y: number }>>> = {
+  B: {
+    WEST: { x: 24, y: 28 },
+    CENTER: { x: 56, y: 28 },
+    EAST: { x: 84, y: 26 },
+    SOUTHWEST: { x: 24, y: 62 },
+    SOUTHCENTER: { x: 66, y: 62 },
+    STAIR: { x: 76, y: 42 },
+  },
+  LG: {
+    WEST: { x: 18, y: 38 },
+    CENTER: { x: 50, y: 34 },
+    EAST: { x: 84, y: 36 },
+    SOUTHWEST: { x: 32, y: 54 },
+    SOUTHCENTER: { x: 58, y: 56 },
+    STAIR: { x: 54, y: 24 },
+  },
+  "1": {
+    WEST: { x: 16, y: 24 },
+    CENTER: { x: 48, y: 24 },
+    EAST: { x: 82, y: 24 },
+    SOUTHWEST: { x: 34, y: 58 },
+    SOUTHCENTER: { x: 58, y: 58 },
+    STAIR: { x: 56, y: 24 },
+  },
+  "2": {
+    WEST: { x: 14, y: 25 },
+    CENTER: { x: 48, y: 24 },
+    EAST: { x: 82, y: 24 },
+    SOUTHWEST: { x: 30, y: 58 },
+    SOUTHCENTER: { x: 60, y: 58 },
+    STAIR: { x: 56, y: 24 },
+  },
+  "3": {
+    WEST: { x: 14, y: 30 },
+    CENTER: { x: 50, y: 30 },
+    EAST: { x: 88, y: 30 },
+    SOUTHWEST: { x: 32, y: 62 },
+    SOUTHCENTER: { x: 60, y: 62 },
+    STAIR: { x: 12, y: 48 },
+  },
+  "4": {
+    WEST: { x: 14, y: 28 },
+    CENTER: { x: 48, y: 28 },
+    EAST: { x: 86, y: 30 },
+    SOUTHWEST: { x: 30, y: 62 },
+    SOUTHCENTER: { x: 62, y: 62 },
+    STAIR: { x: 12, y: 48 },
+  },
+  "5": {
+    WEST: { x: 16, y: 44 },
+    CENTER: { x: 52, y: 42 },
+    EAST: { x: 84, y: 38 },
+    SOUTHWEST: { x: 20, y: 62 },
+    SOUTHCENTER: { x: 60, y: 60 },
+    STAIR: { x: 16, y: 54 },
+  },
+};
+
 const NODES: DemoNode[] = FLOORS.flatMap((floor) =>
-  Object.entries(FLOOR_NODE_TEMPLATE).map(([suffix, template]) => ({
-    id: `${floor.id}_${suffix}`,
-    floorId: floor.id,
-    x: template.x,
-    y: template.y,
-    label: template.label,
-    kind: template.kind,
-  }))
+  Object.entries(FLOOR_NODE_TEMPLATE).map(([suffix, template]) => {
+    const override = FLOOR_NODE_OVERRIDES[floor.id]?.[suffix];
+
+    return {
+      id: `${floor.id}_${suffix}`,
+      floorId: floor.id,
+      x: override?.x ?? template.x,
+      y: override?.y ?? template.y,
+      label: template.label,
+      kind: template.kind,
+    };
+  })
 );
 
 const EDGES: Record<string, Edge[]> = {};

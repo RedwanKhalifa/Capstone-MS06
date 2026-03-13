@@ -6,9 +6,11 @@ import { IconSymbol } from "../../components/ui/icon-symbol";
 import {
   DEMO_ROOMS,
   DESTINATION_ROOMS,
+  FLOOR_FEATURES,
   FLOORS,
   NAVIGATION_START_ROOM_ID,
   type DemoFloor,
+  type DemoFloorFeature,
   type DemoFloorId,
   type DemoRoom,
   getNavigationDemoRoute,
@@ -68,6 +70,14 @@ function projectPoint(x: number, y: number, z: number): IsoPoint {
 
 function polygonString(points: IsoPoint[]) {
   return points.map((point) => `${point.x},${point.y}`).join(" ");
+}
+
+function projectPlanPolygon(
+  points: DemoFloorFeature["points"],
+  z: number,
+  projector: (x: number, y: number, z: number) => IsoPoint = projectPoint
+) {
+  return points.map((point) => projector(point.x, point.y, z));
 }
 
 function extrudeBox(
@@ -151,7 +161,25 @@ function renderRoomBlock(
 
 function renderFloorPlate(floorId: DemoFloorId, activeFloorId: DemoFloorId, floorsOnRoute: DemoFloorId[]) {
   const z = levelZ(floorId) - 2;
-  const plate = extrudeBox(2, 6, 92, 72, z, 3);
+  const floorRooms = DEMO_ROOMS.filter((room) => room.floorId === floorId);
+  const bounds = floorRooms.reduce(
+    (acc, room) => ({
+      minX: Math.min(acc.minX, room.x),
+      minY: Math.min(acc.minY, room.y),
+      maxX: Math.max(acc.maxX, room.x + room.width),
+      maxY: Math.max(acc.maxY, room.y + room.height),
+    }),
+    { minX: 10, minY: 10, maxX: 96, maxY: 76 }
+  );
+  const margin = floorId === "5" ? 4 : 6;
+  const plate = extrudeBox(
+    bounds.minX - margin,
+    bounds.minY - margin,
+    bounds.maxX - bounds.minX + margin * 2,
+    bounds.maxY - bounds.minY + margin * 2,
+    z,
+    3
+  );
   const isActive = floorId === activeFloorId;
   const inRoute = floorsOnRoute.includes(floorId);
   const opacity = isActive ? 1 : inRoute ? 0.72 : 0.26;
@@ -164,6 +192,30 @@ function renderFloorPlate(floorId: DemoFloorId, activeFloorId: DemoFloorId, floo
       <Polygon points={polygonString(plate.top)} fill={topColor} stroke="#bcc7eb" strokeWidth={1} opacity={opacity} />
     </React.Fragment>
   );
+}
+
+function renderFloorFeatures(
+  floorId: DemoFloorId,
+  activeFloorId: DemoFloorId,
+  floorsOnRoute: DemoFloorId[],
+  projector: (x: number, y: number, z: number) => IsoPoint = projectPoint
+) {
+  const features = FLOOR_FEATURES[floorId] ?? [];
+  const isActive = floorId === activeFloorId;
+  const inRoute = floorsOnRoute.includes(floorId);
+  const opacity = isActive ? 0.94 : inRoute ? 0.68 : 0.24;
+  const z = levelZ(floorId) + 0.3;
+
+  return features.map((feature, index) => (
+    <Polygon
+      key={`feature-${floorId}-${index}`}
+      points={polygonString(projectPlanPolygon(feature.points, z, projector))}
+      fill={feature.fill}
+      stroke={feature.stroke ?? "#c2cedf"}
+      strokeWidth={0.9}
+      opacity={opacity}
+    />
+  ));
 }
 
 function routePointsForFloor(
@@ -259,6 +311,7 @@ function BuildingScene({
         />
 
         {visibleFloors.map((floor) => renderFloorPlate(floor.id, activeFloorId, visibleRouteFloors))}
+        {visibleFloors.flatMap((floor) => renderFloorFeatures(floor.id, activeFloorId, visibleRouteFloors))}
 
         {visibleRooms
           .slice()
@@ -337,13 +390,16 @@ function NavigatorScene({
   const guideRooms = DEMO_ROOMS
     .filter((room) => room.floorId === activeFloorId)
     .sort((a, b) => a.y - b.y || a.x - b.x);
-  const focusPoint = currentPoint?.floorId === activeFloorId
-    ? currentPoint
-    : routeOnFloor[Math.max(routeOnFloor.length - 2, 0)] ?? { x: 50, y: 52, floorId: activeFloorId };
+  const sceneAnchor = routeOnFloor.length > 0
+    ? {
+        x: routeOnFloor.reduce((sum, point) => sum + point.x, 0) / routeOnFloor.length,
+        y: routeOnFloor.reduce((sum, point) => sum + point.y, 0) / routeOnFloor.length,
+      }
+    : { x: 50, y: 44 };
   const routeDirection = routeOnFloor.length > 1
     ? {
-        x: routeOnFloor[routeOnFloor.length - 1].x - focusPoint.x,
-        y: routeOnFloor[routeOnFloor.length - 1].y - focusPoint.y,
+        x: routeOnFloor[routeOnFloor.length - 1].x - routeOnFloor[0].x,
+        y: routeOnFloor[routeOnFloor.length - 1].y - routeOnFloor[0].y,
       }
     : { x: 0, y: -1 };
   const directionLength = Math.max(0.001, Math.hypot(routeDirection.x, routeDirection.y));
@@ -355,10 +411,11 @@ function NavigatorScene({
     x: forward.y,
     y: -forward.x,
   };
-  const cameraScale = 5.8;
+  const cameraScale = 5.5;
+  const floorBaseZ = levelZ(activeFloorId);
   const projectGuide = (x: number, y: number, z: number) => {
-    const dx = x - focusPoint.x;
-    const dy = y - focusPoint.y;
+    const dx = x - sceneAnchor.x;
+    const dy = y - sceneAnchor.y;
     const localX = dx * right.x + dy * right.y;
     const localY = dx * forward.x + dy * forward.y;
 
@@ -393,39 +450,44 @@ function NavigatorScene({
   };
   const guideRoute = routeOnFloor
     .map((point) => {
-      const projected = projectGuide(point.x, point.y, levelZ(activeFloorId) + ROOM_HEIGHT + 2);
+      const projected = projectGuide(point.x, point.y, floorBaseZ + ROOM_HEIGHT + 2.8);
       return `${projected.x},${projected.y}`;
     })
     .join(" ");
-  const visibleGuideRooms = guideRooms.filter((room) => {
+  const visibleGuideRooms = guideRooms.map((room) => {
     const centerX = room.x + room.width / 2;
     const centerY = room.y + room.height / 2;
-    const dx = centerX - focusPoint.x;
-    const dy = centerY - focusPoint.y;
+    const dx = centerX - sceneAnchor.x;
+    const dy = centerY - sceneAnchor.y;
     const localX = dx * right.x + dy * right.y;
     const localY = dx * forward.x + dy * forward.y;
 
-    return Math.abs(localX) < 34 && localY > -12 && localY < 52;
-  });
-  const guideRoomsAdjusted = visibleGuideRooms
-    .map((room) => {
-      const centerX = room.x + room.width / 2;
-      const centerY = room.y + room.height / 2;
-      const dx = centerX - focusPoint.x;
-      const dy = centerY - focusPoint.y;
-      const localX = dx * right.x + dy * right.y;
-      const localY = dx * forward.x + dy * forward.y;
-
-      return {
-        ...room,
-        laneSideX: localX < 0 ? 26 : 60,
-        laneDepthY: 14 + Math.max(0, Math.min(42, localY)),
-        laneWidth: Math.max(12, Math.min(16, room.width - 2)),
-        laneHeight: Math.max(10, Math.min(14, room.height)),
-        localX,
-      };
-    })
-    .sort((a, b) => a.laneDepthY - b.laneDepthY);
+    return {
+      ...room,
+      localX,
+      localY,
+    };
+  }).filter((room) => Math.abs(room.localX) < 56 && room.localY > -28 && room.localY < 62)
+    .sort((a, b) => a.localY - b.localY || a.localX - b.localX);
+  const routeBounds = routeOnFloor.reduce(
+    (acc, point) => ({
+      minX: Math.min(acc.minX, point.x),
+      minY: Math.min(acc.minY, point.y),
+      maxX: Math.max(acc.maxX, point.x),
+      maxY: Math.max(acc.maxY, point.y),
+    }),
+    { minX: 30, minY: 10, maxX: 70, maxY: 78 }
+  );
+  const corridorMargin = 7;
+  const guideFloorSlab = extrudeGuideBox(2, 4, 100, 84, floorBaseZ - 4, 3.2);
+  const guideCorridor = extrudeGuideBox(
+    routeBounds.minX - corridorMargin,
+    routeBounds.minY - corridorMargin,
+    routeBounds.maxX - routeBounds.minX + corridorMargin * 2,
+    routeBounds.maxY - routeBounds.minY + corridorMargin * 2,
+    floorBaseZ - 1.1,
+    1.6
+  );
   return (
     <View style={styles.navigatorShell}>
       <View style={styles.navigatorHeader}>
@@ -441,33 +503,21 @@ function NavigatorScene({
           <Rect x={0} y={0} width={360} height={420} fill="#e7ecf3" />
           <Rect x={0} y={0} width={360} height={170} fill="#f7f9fc" />
 
-          <Polygon
-            points={polygonString([
-              projectGuide(-8, 6, levelZ(activeFloorId) - 2),
-              projectGuide(108, 6, levelZ(activeFloorId) - 2),
-              projectGuide(108, 84, levelZ(activeFloorId) - 2),
-              projectGuide(-8, 84, levelZ(activeFloorId) - 2),
-            ])}
-            fill="#dde5f2"
-          />
+          <Polygon points={polygonString(guideFloorSlab.left)} fill="#d0d8e8" />
+          <Polygon points={polygonString(guideFloorSlab.right)} fill="#c6cfdf" />
+          <Polygon points={polygonString(guideFloorSlab.top)} fill="#e7edf6" />
+          {renderFloorFeatures(activeFloorId, activeFloorId, [activeFloorId], projectGuide)}
+          <Polygon points={polygonString(guideCorridor.left)} fill="#c8d1df" opacity={0.9} />
+          <Polygon points={polygonString(guideCorridor.right)} fill="#bcc7d8" opacity={0.9} />
+          <Polygon points={polygonString(guideCorridor.top)} fill="#dce4ee" opacity={0.92} />
 
-          <Polygon
-            points={polygonString([
-              projectGuide(40, 2, levelZ(activeFloorId)),
-              projectGuide(60, 2, levelZ(activeFloorId)),
-              projectGuide(60, 92, levelZ(activeFloorId)),
-              projectGuide(40, 92, levelZ(activeFloorId)),
-            ])}
-            fill="#d4dbe7"
-          />
-
-          {guideRoomsAdjusted.map((room) => {
-            const bottomZ = levelZ(room.floorId);
+          {visibleGuideRooms.map((room) => {
+            const bottomZ = floorBaseZ;
             const block = extrudeGuideBox(
-              room.laneSideX,
-              room.laneDepthY,
-              room.laneWidth,
-              room.laneHeight,
+              room.x,
+              room.y,
+              room.width,
+              room.height,
               bottomZ,
               ROOM_HEIGHT + 2
             );
@@ -477,8 +527,8 @@ function NavigatorScene({
             const leftColor = shadeHex(room.color, -14);
             const rightColor = shadeHex(room.color, -32);
             const labelPoint = projectGuide(
-              room.laneSideX + room.laneWidth / 2,
-              room.laneDepthY + room.laneHeight / 2,
+              room.x + room.width / 2,
+              room.y + room.height / 2,
               bottomZ + ROOM_HEIGHT + 5
             );
 
@@ -487,7 +537,7 @@ function NavigatorScene({
                 <Polygon points={polygonString(block.left)} fill={leftColor} opacity={0.96} />
                 <Polygon points={polygonString(block.right)} fill={rightColor} opacity={0.96} />
                 <Polygon points={polygonString(block.top)} fill={roofColor} stroke="#2f3f70" strokeWidth={1} opacity={0.98} />
-                {(isStart || isDestination || Math.abs(room.localX) < 24) && (
+                {(isStart || isDestination || (Math.abs(room.localX) < 28 && room.localY > -6 && room.localY < 50)) && (
                   <SvgText
                     x={labelPoint.x}
                     y={labelPoint.y}
@@ -516,13 +566,13 @@ function NavigatorScene({
 
           {routeOnFloor[0] && (() => {
             const start = routeOnFloor[0];
-            const projected = projectGuide(start.x, start.y, levelZ(activeFloorId) + ROOM_HEIGHT + 2);
+            const projected = projectGuide(start.x, start.y, floorBaseZ + ROOM_HEIGHT + 2.8);
             return <Circle cx={projected.x} cy={projected.y} r={5.2} fill="#10b981" stroke="#ffffff" strokeWidth={1.8} />;
           })()}
 
           {routeOnFloor[routeOnFloor.length - 1] && (() => {
             const end = routeOnFloor[routeOnFloor.length - 1];
-            const projected = projectGuide(end.x, end.y, levelZ(activeFloorId) + ROOM_HEIGHT + 2);
+            const projected = projectGuide(end.x, end.y, floorBaseZ + ROOM_HEIGHT + 2.8);
             return <Circle cx={projected.x} cy={projected.y} r={5.6} fill="#f59e0b" stroke="#ffffff" strokeWidth={2} />;
           })()}
 
@@ -530,21 +580,22 @@ function NavigatorScene({
             const projected = projectGuide(
               currentPoint.x,
               currentPoint.y,
-              levelZ(activeFloorId) + ROOM_HEIGHT + 3.6
+              floorBaseZ + ROOM_HEIGHT + 4.4
             );
             return (
               <>
-                <Circle cx={projected.x} cy={projected.y} r={9} fill="rgba(37,99,235,0.16)" />
-                <Circle cx={projected.x} cy={projected.y} r={5.2} fill="#ef4444" stroke="#ffffff" strokeWidth={2.2} />
+                <Circle cx={projected.x} cy={projected.y} r={12} fill="rgba(37,99,235,0.16)" />
+                <Circle cx={projected.x} cy={projected.y} r={6.6} fill="#2563eb" stroke="#ffffff" strokeWidth={2.4} />
+                <Circle cx={projected.x} cy={projected.y} r={2.3} fill="#ffffff" />
               </>
             );
           })()}
 
           <SvgText x={24} y={88} fontSize={12} fontWeight="700" fill="#66758e">
-            Third-Person Indoor Guide
+            Tilted Overview
           </SvgText>
           <SvgText x={24} y={104} fontSize={11} fill="#7b889e">
-            {getFloorMeta(activeFloorId).label}
+            {getFloorMeta(activeFloorId).label} live guidance
           </SvgText>
         </Svg>
       </View>
