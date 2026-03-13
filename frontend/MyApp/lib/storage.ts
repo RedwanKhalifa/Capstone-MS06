@@ -4,6 +4,14 @@ import type { AnchorPoint, TrainingDataset } from '@/types/fingerprint';
 
 const POINTS_FILE = `${FileSystem.documentDirectory}anchor-points.json`;
 const DATASET_FILE = `${FileSystem.documentDirectory}dataset.json`;
+const POSITIONING_PROJECT_FILE = `${FileSystem.documentDirectory}positioning-project.json`;
+
+type PositioningProject = {
+  points: AnchorPoint[];
+  dataset: TrainingDataset;
+};
+
+const EMPTY_DATASET: TrainingDataset = { beaconKeys: [], samples: [], rows: [] };
 
 async function readJson<T>(uri: string, fallback: T): Promise<T> {
   try {
@@ -24,5 +32,27 @@ export const loadPoints = () => readJson<AnchorPoint[]>(POINTS_FILE, []);
 export const savePoints = (points: AnchorPoint[]) => writeJson(POINTS_FILE, points);
 
 export const loadDataset = () =>
-  readJson<TrainingDataset>(DATASET_FILE, { beaconKeys: [], samples: [], rows: [] });
+  readJson<TrainingDataset>(DATASET_FILE, EMPTY_DATASET);
 export const saveDataset = (dataset: TrainingDataset) => writeJson(DATASET_FILE, dataset);
+
+export const loadPositioningProject = async (): Promise<PositioningProject> => {
+  const bundled = await readJson<PositioningProject | null>(POSITIONING_PROJECT_FILE, null);
+  if (bundled && Array.isArray(bundled.points) && bundled.dataset) {
+    return {
+      points: bundled.points,
+      dataset: bundled.dataset,
+    };
+  }
+
+  // Legacy fallback: older app versions saved these independently.
+  const [points, dataset] = await Promise.all([loadPoints(), loadDataset()]);
+  return { points, dataset };
+};
+
+export const savePositioningProject = async (project: PositioningProject) => {
+  // Write bundled snapshot atomically for point+fingerprint consistency.
+  await writeJson(POSITIONING_PROJECT_FILE, project);
+
+  // Keep legacy files in sync for backward compatibility with existing readers.
+  await Promise.all([savePoints(project.points), saveDataset(project.dataset)]);
+};

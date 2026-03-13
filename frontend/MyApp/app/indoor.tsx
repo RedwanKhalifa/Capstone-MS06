@@ -1,31 +1,24 @@
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { FloorplanCanvas } from "@/components/maps/floorplan-canvas";
-import { subscribeLivePosition, type LivePosition } from "@/services/positioning-adapter";
+import { usePositioning } from "@/context/positioning";
 import { FLOOR_PLANS } from "@/types/fingerprint";
+
+const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
 
 export default function IndoorNavigationScreen() {
   const router = useRouter();
+  const positioning = usePositioning();
+  const currentPosition = positioning.prediction ?? FALLBACK_POSITION;
 
-  const [currentPosition, setCurrentPosition] = useState<LivePosition>({
-    x: 0.82,
-    y: 0.42,
-    timestamp: Date.now(),
-    planId: "ENG4_NORTH",
-  });
   const [destinationDot, setDestinationDot] = useState<{ xNorm: number; yNorm: number } | null>(null);
   const [placingDestination, setPlacingDestination] = useState(false);
   const [tracking, setTracking] = useState(true);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
 
   const plan = FLOOR_PLANS.find((p) => p.id === "ENG4_NORTH")!;
-
-  useEffect(() => {
-    const unsubscribe = subscribeLivePosition(setCurrentPosition, 700);
-    return unsubscribe;
-  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
