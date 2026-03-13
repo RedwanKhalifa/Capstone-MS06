@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { LayoutChangeEvent, Image as RNImage, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Svg, { Circle as SvgCircle, Polyline } from 'react-native-svg';
 
 import type { AnchorPoint } from '@/types/fingerprint';
 
@@ -13,6 +14,7 @@ type Props = {
   points: AnchorPoint[];
   liveDot?: { xNorm: number; yNorm: number } | null;
   destinationDot?: { xNorm: number; yNorm: number } | null;
+  routePoints?: { xNorm: number; yNorm: number }[];
   selectedPointId?: string | null;
   canAddPoint?: boolean;
   onAddPoint?: (xNorm: number, yNorm: number) => void;
@@ -34,6 +36,7 @@ export function FloorplanCanvas({
   selectedPointId,
   liveDot,
   destinationDot,
+  routePoints = [],
   canAddPoint = false,
   onAddPoint,
   dragPointId,
@@ -157,6 +160,34 @@ export function FloorplanCanvas({
               allowDownscaling={false}
               transition={0}
             />
+            {routePoints.length > 1 ? (
+              <Svg pointerEvents="none" width={baseW} height={baseH} style={StyleSheet.absoluteFillObject}>
+                <Polyline
+                  points={routePoints.map((p) => `${p.xNorm * baseW},${p.yNorm * baseH}`).join(' ')}
+                  fill="none"
+                  stroke="#2c3ea3"
+                  strokeWidth={8}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <SvgCircle
+                  cx={routePoints[0].xNorm * baseW}
+                  cy={routePoints[0].yNorm * baseH}
+                  r={9}
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                />
+                <SvgCircle
+                  cx={routePoints[routePoints.length - 1].xNorm * baseW}
+                  cy={routePoints[routePoints.length - 1].yNorm * baseH}
+                  r={9}
+                  fill="#f59e0b"
+                  stroke="#ffffff"
+                  strokeWidth={3}
+                />
+              </Svg>
+            ) : null}
             {points.map((p) => (
               <View key={p.id} style={[styles.markerSlot, { left: p.xNorm * baseW - 9, top: p.yNorm * baseH - 9 }]}>
                 <Animated.View style={[styles.marker, p.id === selectedPointId && styles.markerSelected, markerStyle]} />
