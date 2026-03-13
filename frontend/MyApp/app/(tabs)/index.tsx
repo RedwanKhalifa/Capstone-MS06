@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
@@ -11,12 +12,27 @@ import {
     TextInput,
     View,
 } from "react-native";
+import MapView, { PROVIDER_GOOGLE } from "react-native-maps";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
 import { useAppState } from "../../context/app-state";
 
+const TMU_REGION = {
+  latitude: 43.6577,
+  longitude: -79.3788,
+  latitudeDelta: 0.0085,
+  longitudeDelta: 0.0085,
+};
 const MAP_IMAGE = require("../../assets/images/CampusMapEng1stFloor.png");
+
+const getAndroidGoogleMapsKey = () => {
+  const key =
+    (Constants.expoConfig as any)?.android?.config?.googleMaps?.apiKey ??
+    (Constants.manifest2 as any)?.extra?.expoClient?.android?.config?.googleMaps?.apiKey ??
+    "";
+  return typeof key === "string" ? key.trim() : "";
+};
 
 const BUILDING_RESULTS = TMU_BUILDINGS.map((building) => `${building.code} - ${building.name}`);
 const SEARCH_SUGGESTIONS = ["ENG", ...ENG_ROOMS];
@@ -29,6 +45,10 @@ export default function HomeScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<BuildingEntry | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  const hasValidGoogleMapsKey = useMemo(() => {
+    const key = getAndroidGoogleMapsKey();
+    return !!key && key !== "YOUR_ANDROID_GOOGLE_MAPS_API_KEY";
+  }, []);
 
   const filteredResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -75,7 +95,20 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      <ImageBackground source={MAP_IMAGE} style={styles.map}>
+      <View style={styles.map}>
+        {hasValidGoogleMapsKey ? (
+          <MapView
+            provider={PROVIDER_GOOGLE}
+            style={styles.mapBackground}
+            initialRegion={TMU_REGION}
+            showsCompass={false}
+            toolbarEnabled={false}
+            rotateEnabled={false}
+          />
+        ) : (
+          <ImageBackground source={MAP_IMAGE} style={styles.mapBackground} />
+        )}
+
         <View style={styles.searchBar}>
           <IconSymbol name="magnifyingglass" color="#4a4a4a" size={20} />
           <TextInput
@@ -171,7 +204,7 @@ export default function HomeScreen() {
         <Pressable style={styles.accessibilityButton} onPress={() => setAllAccessibility(true)}>
           <IconSymbol name="person.circle" color="#1c2b85" size={26} />
         </Pressable>
-      </ImageBackground>
+      </View>
 
       <View style={[styles.sheet, sheetOpen && styles.sheetOpen]}>
         <Pressable style={styles.sheetHandle} onPress={() => setSheetOpen((open) => !open)}>
@@ -184,8 +217,8 @@ export default function HomeScreen() {
         </Pressable>
         {sheetOpen && (
           <ScrollView style={styles.sheetList}>
-            {TMU_BUILDINGS.map((building) => (
-              <Text key={building.code} style={styles.sheetItemText}>
+            {TMU_BUILDINGS.map((building, index) => (
+              <Text key={`${building.code}-${building.name}-${index}`} style={styles.sheetItemText}>
                 {building.name} ({building.code})
               </Text>
             ))}
@@ -226,6 +259,10 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
     paddingTop: 12,
+    overflow: "hidden",
+  },
+  mapBackground: {
+    ...StyleSheet.absoluteFillObject,
   },
   searchBar: {
     flexDirection: "row",

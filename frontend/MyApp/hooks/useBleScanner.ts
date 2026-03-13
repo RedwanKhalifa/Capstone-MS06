@@ -86,6 +86,7 @@ export function useBleScanner(): UseBleScannerResult {
         try {
           const granted = await PermissionsAndroid.requestMultiple([
             PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
             PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN as never,
             PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT as never,
           ]);
