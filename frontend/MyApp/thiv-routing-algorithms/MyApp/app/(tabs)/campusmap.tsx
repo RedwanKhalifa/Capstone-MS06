@@ -30,6 +30,10 @@ type Edge = {
   weight: number;
 };
 
+const FLOOR_TRANSITIONS: Edge[] = [
+  { target: "N1", weight: 8 },
+];
+
 const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -78,6 +82,10 @@ function dijkstra(
   while (u) {
     path.unshift(u);
     u = prev[u];
+  }
+
+  if (path[0] !== startId) {
+    return [];
   }
 
   return path;
@@ -182,6 +190,7 @@ export default function CampusMap() {
     "3N4": [
       { target: "3N3", weight: 5 },
       { target: "3N7", weight: 2 },
+      ...FLOOR_TRANSITIONS,
     ],
     "3N5": [
       { target: "3N6", weight: 30 },
@@ -203,6 +212,7 @@ export default function CampusMap() {
     N1: [
       { target: "N2", weight: 12 },
       { target: "N12", weight: 10 },
+      { target: "3N4", weight: 8 },
     ],
     N2: [
       { target: "N1", weight: 12 },
@@ -263,13 +273,7 @@ export default function CampusMap() {
     );
   });
 
-  /* =======================
-     ANIMATION
-  ======================= */
-  const traversePath = (points: { x: number; y: number }[], floor: number) => {
-    if (!points || points.length < 2) return;
-
-    // Stop any previous animation
+  const stopSimulation = (clearPaths = false) => {
     if (animationRef.current) {
       try {
         animationRef.current.stop();
@@ -279,6 +283,22 @@ export default function CampusMap() {
       animationRef.current = null;
     }
 
+    setIsSimulating(false);
+    setSimulatedFloor(null);
+
+    if (clearPaths) {
+      setFloorPaths({});
+    }
+  };
+
+  /* =======================
+     ANIMATION
+  ======================= */
+  const animateFloorSegment = (
+    points: { x: number; y: number }[],
+    floor: number,
+    onComplete?: () => void,
+  ) => {
     // Ensure an Animated.ValueXY exists for this floor
     let anim = locationAnims.current[floor];
     if (!anim) {
@@ -291,6 +311,12 @@ export default function CampusMap() {
     setIsSimulating(true);
     setSimulatedFloor(floor);
 
+    if (points.length < 2) {
+      animationRef.current = null;
+      onComplete?.();
+      return;
+    }
+
     const anims = points.slice(1).map((p) =>
       Animated.timing(anim as any, {
         toValue: p,
@@ -302,10 +328,41 @@ export default function CampusMap() {
 
     animationRef.current = Animated.sequence(anims);
     animationRef.current.start(() => {
-      setIsSimulating(false);
-      setSimulatedFloor(null);
       animationRef.current = null;
+      onComplete?.();
     });
+  };
+
+  const traverseMultiFloorPath = (
+    segments: { floor: number; points: { x: number; y: number }[] }[],
+  ) => {
+    if (segments.length === 0) return;
+
+    stopSimulation();
+
+    const runSegment = (index: number) => {
+      const segment = segments[index];
+      if (!segment) {
+        setIsSimulating(false);
+        setSimulatedFloor(null);
+        return;
+      }
+
+      setCurrentFloor(segment.floor);
+      animateFloorSegment(segment.points, segment.floor, () => {
+        const nextSegment = segments[index + 1];
+        if (!nextSegment) {
+          setIsSimulating(false);
+          setSimulatedFloor(null);
+          return;
+        }
+
+        setCurrentFloor(nextSegment.floor);
+        setTimeout(() => runSegment(index + 1), 350);
+      });
+    };
+
+    runSegment(0);
   };
 
   useEffect(() => {
@@ -329,14 +386,7 @@ export default function CampusMap() {
   // to avoid artifacts from a previous-floor animation being shown.
   useEffect(() => {
     if (animationRef.current && simulatedFloor !== null && simulatedFloor !== currentFloor) {
-      try {
-        animationRef.current.stop();
-      } catch (e) {
-        // ignore
-      }
-      animationRef.current = null;
-      setIsSimulating(false);
-      setSimulatedFloor(null);
+      stopSimulation();
       // Clear the animated value for the previously-simulated floor
       const prevAnim = locationAnims.current[simulatedFloor];
       if (prevAnim && typeof prevAnim.setValue === "function") {
@@ -372,38 +422,59 @@ export default function CampusMap() {
       return;
     }
 
-    if (startNode.floor !== endNode.floor) {
-      Alert.alert("Cross-floor routing isn't supported yet.");
-      return;
-    }
-
-    const floor = startNode.floor;
-    const floorNodes = allNodes.filter((n) => n.floor === floor);
-
-    const floorEdges: Record<string, Edge[]> = {};
-    floorNodes.forEach((n) => {
-      floorEdges[n.id] = (edges[n.id] || []).filter((e) =>
-        floorNodes.some((x) => x.id === e.target),
-      );
-    });
-
-    const ids = dijkstra(floorNodes, floorEdges, start, end);
+    const ids = dijkstra(allNodes, edges, start, end);
 
     console.log("Dijkstra path IDs:", ids);
 
-    const coords = ids
-      .map((id) => floorNodes.find((n) => n.id === id))
+    if (ids.length < 2) {
+      stopSimulation(true);
+      Alert.alert("No route found.");
+      return;
+    }
+
+    const pathNodes = ids
+      .map((id) => allNodes.find((n) => n.id === id))
       .filter((n): n is GraphNode => n !== undefined);
 
-    if (coords.length < 2) return;
+    if (pathNodes.length < 2) return;
 
-    setCurrentFloor(floor);
-    setFloorPaths((prev) => ({ ...prev, [floor]: coords }));
-    traversePath(coords, floor);
+    const nextFloorPaths = pathNodes.reduce<Record<number, { x: number; y: number }[]>>(
+      (acc, node) => {
+        if (!acc[node.floor]) {
+          acc[node.floor] = [];
+        }
+        acc[node.floor].push({ x: node.x, y: node.y });
+        return acc;
+      },
+      {},
+    );
+
+    const segments = pathNodes.reduce<
+      { floor: number; points: { x: number; y: number }[] }[]
+    >((acc, node) => {
+      const point = { x: node.x, y: node.y };
+      const lastSegment = acc[acc.length - 1];
+
+      if (!lastSegment || lastSegment.floor !== node.floor) {
+        acc.push({ floor: node.floor, points: [point] });
+      } else {
+        lastSegment.points.push(point);
+      }
+
+      return acc;
+    }, []);
+
+    setFloorPaths(nextFloorPaths);
+    setCurrentFloor(startNode.floor);
+    traverseMultiFloorPath(segments);
+
+    if (startNode.floor !== endNode.floor) {
+      Alert.alert(
+        "Floor transition",
+        `Route includes a floor change from ${startNode.floor} to ${endNode.floor} using 3N4 -> N1.`,
+      );
+    }
   };
-
-  const runDijkstra3rdFloor = () => runDijkstra("3N1", "3N4");
-  const runDijkstra4thFloor = () => runDijkstra("N1", "N11");
 
   // Only show markers for floor 4; disable markers for floors 1 and 2.
   const markers = currentFloor === 4 ? floor4Markers : [];
@@ -411,6 +482,7 @@ export default function CampusMap() {
   const showMarkers = false;
 
   const currentPathPoints = floorPaths[currentFloor] || [];
+  const selectorNodes = allNodes;
 
   /* =======================
      RENDER
@@ -421,10 +493,13 @@ export default function CampusMap() {
         <View style={styles.selectorColumn}>
           <Text style={styles.selectorLabel}>Start</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {nodesOnCurrentFloor.map((n) => (
+            {selectorNodes.map((n) => (
               <TouchableOpacity
                 key={n.id}
-                onPress={() => setSelectedStartId(n.id)}
+                onPress={() => {
+                  stopSimulation(true);
+                  setSelectedStartId(n.id);
+                }}
                 style={[
                   styles.nodeButton,
                   selectedStartId === n.id && styles.nodeButtonSelected,
@@ -447,10 +522,13 @@ export default function CampusMap() {
         <View style={styles.selectorColumn}>
           <Text style={styles.selectorLabel}>End</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {nodesOnCurrentFloor.map((n) => (
+            {selectorNodes.map((n) => (
               <TouchableOpacity
                 key={n.id}
-                onPress={() => setSelectedEndId(n.id)}
+                onPress={() => {
+                  stopSimulation(true);
+                  setSelectedEndId(n.id);
+                }}
                 style={[
                   styles.nodeButton,
                   selectedEndId === n.id && styles.nodeButtonSelected,
@@ -476,10 +554,22 @@ export default function CampusMap() {
       </View>
 
       <View style={styles.floorButtons}>
-        <Button title="1st Floor" onPress={() => setCurrentFloor(1)} />
-        <Button title="2nd Floor" onPress={() => setCurrentFloor(2)} />
-        <Button title="3rd Floor" onPress={runDijkstra3rdFloor} />
-        <Button title="4th Floor" onPress={runDijkstra4thFloor} />
+        <Button title="1st Floor" onPress={() => {
+          stopSimulation(true);
+          setCurrentFloor(1);
+        }} />
+        <Button title="2nd Floor" onPress={() => {
+          stopSimulation(true);
+          setCurrentFloor(2);
+        }} />
+        <Button title="3rd Floor" onPress={() => {
+          stopSimulation(true);
+          setCurrentFloor(3);
+        }} />
+        <Button title="4th Floor" onPress={() => {
+          stopSimulation(true);
+          setCurrentFloor(4);
+        }} />
       </View>
 
       <ImageZoom
@@ -595,6 +685,7 @@ export default function CampusMap() {
               }),
             )}
           </Svg>
+
         </View>
       </ImageZoom>
     </View>
