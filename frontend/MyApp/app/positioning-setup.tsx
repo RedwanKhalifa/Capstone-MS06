@@ -3,17 +3,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { FloorplanCanvas } from '@/components/maps/floorplan-canvas';
-import { useBeaconRanger } from '@/hooks/use-beacon-ranger';
+import { usePositioning } from '@/context/positioning';
 import { buildDataset, exportRowsCsv, importCsvText, parseCsvRows } from '@/lib/csv';
-import { buildKnnCache, regressKnn } from '@/lib/knn';
 import { requestBlePermissions } from '@/lib/permissions';
-import { loadDataset, loadPoints, saveDataset, savePoints } from '@/lib/storage';
-import { setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
-import { BEACON_UUID_DEFAULT, FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
+import { loadPositioningProject, savePositioningProject } from '@/lib/storage';
+import { FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
 type LiveMode = 'bluetooth' | 'manual';
-const LIVE_INFERENCE_INTERVAL_MS = 1000;
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -33,27 +30,21 @@ export default function PositioningSetupScreen() {
   const [isHydrated, setIsHydrated] = useState(false);
 
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
-  const [uuid, setUuid] = useState(BEACON_UUID_DEFAULT);
   const [captureWindow, setCaptureWindow] = useState('3');
   const [isCapturing, setIsCapturing] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [medians, setMedians] = useState<Record<string, number>>({});
-  const [runningLive, setRunningLive] = useState(false);
   const [liveMode, setLiveMode] = useState<LiveMode>('bluetooth');
-  const [prediction, setPrediction] = useState<LivePosition | null>(null);
-  const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
-  const { beacons, isScanning, scanError, start, stop, clear } = useBeaconRanger(uuid);
+  const positioning = usePositioning();
 
   const buffers = useRef<Record<string, number[]>>({});
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevRef = useRef<{ x: number; y: number } | null>(null);
-  const latestBeaconsRef = useRef(beacons);
-  const latestCacheRef = useRef<ReturnType<typeof buildKnnCache> | null>(null);
-  const latestPlanIdRef = useRef<PlanID>(selectedPlanID);
+  // Ref so the capture-loop closure always reads the latest beacons.
+  const latestBeaconsRef = useRef(positioning.beacons);
 
   useEffect(() => {
     let mounted = true;
-    Promise.all([loadPoints(), loadDataset()]).then(([storedPoints, storedDataset]) => {
+    loadPositioningProject().then(({ points: storedPoints, dataset: storedDataset }) => {
       if (!mounted) return;
       setPoints(storedPoints);
       setDataset(storedDataset);
@@ -66,63 +57,30 @@ export default function PositioningSetupScreen() {
 
   useEffect(() => {
     if (!isHydrated) return;
-    savePoints(points);
-  }, [points, isHydrated]);
-
-  useEffect(() => {
-    if (!isHydrated) return;
-    saveDataset(dataset);
-  }, [dataset, isHydrated]);
-
-  useEffect(() => {
-    setPlanName(selectedPlanID);
-  }, [selectedPlanID]);
+    let active = true;
+    void (async () => {
+      await savePositioningProject({ points, dataset });
+      if (active) positioning.reloadDataset();
+    })();
+    return () => {
+      active = false;
+    };
+  }, [points, dataset, isHydrated, positioning]);
 
   const selectedPlan = FLOOR_PLANS.find((p) => p.id === selectedPlanID)!;
   const planPoints = useMemo(() => points.filter((p) => p.planID === selectedPlanID), [points, selectedPlanID]);
   const selectedPoint = planPoints.find((p) => p.id === selectedPointId) ?? null;
-  const cache = useMemo(() => buildKnnCache(dataset, selectedPlanID), [dataset, selectedPlanID]);
+  const planSamples = dataset.samples.filter((s) => s.planID === selectedPlanID);
+  const planTrainingCount = planSamples.length;
+  const trainedPointCount = new Set(planSamples.map((s) => `${s.xNorm.toFixed(4)}|${s.yNorm.toFixed(4)}`)).size;
+  const planTrainableRows = dataset.rows.filter(
+    (r) => r.planID === selectedPlanID && (r.mode.startsWith('median') || r.mode === 'live')
+  );
+  const capturedPointCount = new Set(planTrainableRows.map((r) => r.pointID)).size;
 
   useEffect(() => {
-    latestBeaconsRef.current = beacons;
-  }, [beacons]);
-
-  useEffect(() => {
-    latestCacheRef.current = cache;
-  }, [cache]);
-
-  useEffect(() => {
-    latestPlanIdRef.current = selectedPlanID;
-  }, [selectedPlanID]);
-
-  useEffect(() => {
-    if (!runningLive) return;
-
-    const tick = () => {
-      const latestCache = latestCacheRef.current;
-      if (!latestCache) return;
-
-      const next = regressKnn(latestCache, latestBeaconsRef.current, prevRef.current, 5, 0.2);
-      if (!next) return;
-
-      const now = Date.now();
-      const planId = latestPlanIdRef.current;
-
-      prevRef.current = { x: next.x, y: next.y };
-      setPrediction({
-        x: next.x,
-        y: next.y,
-        timestamp: now,
-        planId,
-      });
-      setLiveConfidence(next.confidence);
-      void setLivePosition(next.x, next.y, { timestamp: now, planId });
-    };
-
-    tick();
-    const interval = setInterval(tick, LIVE_INFERENCE_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [runningLive]);
+    latestBeaconsRef.current = positioning.beacons;
+  }, [positioning.beacons]);
 
   const beginCapture = () => {
     if (!selectedPoint) {
@@ -137,7 +95,7 @@ export default function PositioningSetupScreen() {
     setIsCapturing(true);
     timer.current && clearInterval(timer.current);
     timer.current = setInterval(() => {
-      beacons.forEach((b) => {
+      latestBeaconsRef.current.forEach((b) => {
         const bucket = buffers.current[b.key] ?? [];
         bucket.push(b.rssi);
         buffers.current[b.key] = bucket;
@@ -172,17 +130,18 @@ export default function PositioningSetupScreen() {
       Alert.alert('Pick anchor point first');
       return;
     }
+    const captureTimestamp = new Date().toISOString();
     const rows: FingerprintCsvRow[] = Object.entries(medians).map(([key, rssi]) => {
-      const live = beacons.find((b) => b.key === key);
+      const live = positioning.beacons.find((b) => b.key === key);
       const [major, minor] = key.split('_').map(Number);
       return {
-        timestamp: new Date().toISOString(),
+        timestamp: captureTimestamp,
         planID: selectedPlanID,
         pointID: selectedPoint.id,
         pointName: selectedPoint.name,
         xNorm: selectedPoint.xNorm,
         yNorm: selectedPoint.yNorm,
-        uuid: live?.uuid ?? uuid,
+        uuid: live?.uuid ?? positioning.uuid,
         major,
         minor,
         rssi,
@@ -199,7 +158,7 @@ export default function PositioningSetupScreen() {
     }
     const ts = new Date().toISOString();
     appendRows(
-      beacons.map((b) => ({
+      positioning.beacons.map((b) => ({
         timestamp: ts,
         planID: selectedPlanID,
         pointID: selectedPoint.id,
@@ -242,51 +201,36 @@ export default function PositioningSetupScreen() {
 
   const handleLiveStart = async () => {
     setLiveMode('bluetooth');
-    const granted = await requestBlePermissions();
-    if (!granted) {
-      Alert.alert('Permissions required', 'Bluetooth and Location permissions are required to scan beacons.');
-      return;
+    try {
+      await positioning.startBluetooth();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bluetooth and Location permissions are required to scan beacons.';
+      Alert.alert('Unable to start live Bluetooth mode', message);
     }
-    prevRef.current = null;
-    setPrediction(null);
-    clear();
-    start();
-    setRunningLive(true);
   };
 
   const setManualLivePosition = (xNorm: number, yNorm: number) => {
-    const now = Date.now();
-    const planId = selectedPlanID;
-    stop();
-    setRunningLive(false);
-    prevRef.current = null;
     setLiveMode('manual');
-    setLiveConfidence(null);
-    setPrediction({ x: xNorm, y: yNorm, timestamp: now, planId });
-    void setLivePosition(xNorm, yNorm, { timestamp: now, planId, accuracy: 0 });
+    positioning.setManualPosition(xNorm, yNorm);
   };
 
   const handleCollectStart = async () => {
-    const granted = await requestBlePermissions();
-    if (!granted) {
+    try {
+      await positioning.startScanOnly();
+    } catch {
       Alert.alert('Permissions required', 'Bluetooth and Location permissions are required to scan beacons.');
-      return;
     }
-    clear();
-    start();
   };
 
   const handleLiveStop = () => {
-    stop();
-    setRunningLive(false);
-    setPrediction(null);
-    prevRef.current = null;
+    positioning.stopBluetooth();
+    setLiveMode('bluetooth');
   };
 
   const renderCollect = () => (
     <View style={styles.sectionCard}>
       <Text style={styles.sectionTitle}>Collect Fingerprints</Text>
-      <TextInput style={styles.input} value={uuid} onChangeText={setUuid} placeholder="Beacon UUID" autoCapitalize="none" />
+      <TextInput style={styles.input} value={positioning.uuid} onChangeText={positioning.setUuid} placeholder="Beacon UUID" autoCapitalize="none" />
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rowWrap}>
         {planPoints.map((p) => (
@@ -300,13 +244,13 @@ export default function PositioningSetupScreen() {
       <Text style={styles.hint}>Perm requests Android BLE/location runtime permissions (Scan/Connect/Fine Location).</Text>
       <View style={styles.rowWrap}>
         <Pressable style={styles.btn} onPress={requestBlePermissions}><Text style={styles.btnText}>Perm</Text></Pressable>
-        <Pressable style={styles.btn} onPress={handleCollectStart} disabled={isScanning}><Text style={styles.btnText}>Start ranging</Text></Pressable>
-        <Pressable style={styles.btnOutline} onPress={stop}><Text>Stop</Text></Pressable>
-        <Pressable style={styles.btnOutline} onPress={clear}><Text>Clear live</Text></Pressable>
+        <Pressable style={styles.btn} onPress={handleCollectStart} disabled={positioning.isScanning}><Text style={styles.btnText}>Start ranging</Text></Pressable>
+        <Pressable style={styles.btnOutline} onPress={positioning.stopScan}><Text>Stop</Text></Pressable>
+        <Pressable style={styles.btnOutline} onPress={positioning.clearBeacons}><Text>Clear live</Text></Pressable>
       </View>
-      <Text>{isScanning ? `Scanning… Beacons found: ${beacons.length}` : 'Scanner stopped'}</Text>
-      {scanError ? <Text style={styles.errorText}>Scan error: {scanError}</Text> : null}
-      {isScanning && beacons.length === 0 ? <Text style={styles.hint}>If none appear, verify beacon power and UUID filter.</Text> : null}
+      <Text>{positioning.isScanning ? `Scanning… Beacons found: ${positioning.beacons.length}` : 'Scanner stopped'}</Text>
+      {positioning.scanError ? <Text style={styles.errorText}>Scan error: {positioning.scanError}</Text> : null}
+      {positioning.isScanning && positioning.beacons.length === 0 ? <Text style={styles.hint}>If none appear, verify beacon power and UUID filter.</Text> : null}
 
       <View style={styles.rowWrap}>
         <TextInput style={[styles.input, styles.smallInput]} value={captureWindow} onChangeText={setCaptureWindow} keyboardType="numeric" />
@@ -324,7 +268,7 @@ export default function PositioningSetupScreen() {
 
       <Text>Rows: {dataset.rows.length} • Samples: {dataset.samples.length} • Features: {dataset.beaconKeys.length}</Text>
       {Object.entries(medians).map(([k, r]) => <Text key={k}>median {k}: {r}</Text>)}
-      {beacons.map((b) => <Text key={b.key}>{b.key} ({b.uuid}) RSSI {b.rssi}</Text>)}
+      {positioning.beacons.map((b) => <Text key={b.key}>{b.key} ({b.uuid}) RSSI {b.rssi}</Text>)}
     </View>
   );
 
@@ -335,22 +279,19 @@ export default function PositioningSetupScreen() {
         <FloorplanCanvas
           imageSource={selectedPlan.image}
           points={planPoints}
-          liveDot={prediction ? { xNorm: prediction.x, yNorm: prediction.y } : null}
+          liveDot={positioning.prediction ? { xNorm: positioning.prediction.x, yNorm: positioning.prediction.y } : null}
           canAddPoint={liveMode === 'manual'}
           onAddPoint={setManualLivePosition}
         />
       </View>
 
-      <TextInput style={styles.input} value={uuid} onChangeText={setUuid} placeholder="Beacon UUID" />
+      <TextInput style={styles.input} value={positioning.uuid} onChangeText={positioning.setUuid} placeholder="Beacon UUID" />
       <View style={styles.rowWrap}>
         <Pressable
           style={[styles.chip, liveMode === 'manual' && styles.chipActive]}
           onPress={() => {
-            stop();
-            setRunningLive(false);
-            prevRef.current = null;
+            positioning.stopBluetooth();
             setLiveMode('manual');
-            setLiveConfidence(null);
           }}>
           <Text>Manual mode</Text>
         </Pressable>
@@ -385,19 +326,27 @@ export default function PositioningSetupScreen() {
       <Text>
         {liveMode === 'manual'
           ? 'Manual mode does not require scanning.'
-          : isScanning
-            ? `Scanning… Beacons found: ${beacons.length}`
+          : positioning.isScanning
+            ? `Scanning… Beacons found: ${positioning.beacons.length}`
             : 'Scanner stopped'}
       </Text>
-      {scanError ? <Text style={styles.errorText}>Scan error: {scanError}</Text> : null}
+      {positioning.scanError ? <Text style={styles.errorText}>Scan error: {positioning.scanError}</Text> : null}
 
       <Text>
-        {prediction
-          ? `x=${prediction.x.toFixed(3)} y=${prediction.y.toFixed(3)} confidence=${liveConfidence != null ? `${(liveConfidence * 100).toFixed(1)}%` : 'N/A'}`
+        {positioning.prediction
+          ? `x=${positioning.prediction.x.toFixed(3)} y=${positioning.prediction.y.toFixed(3)} confidence=${positioning.liveConfidence != null ? `${(positioning.liveConfidence * 100).toFixed(1)}%` : 'N/A'}`
           : 'No prediction yet'}
       </Text>
-      <Text>Plan training samples: {dataset.samples.filter((s) => s.planID === selectedPlanID).length}</Text>
-      <Text>{runningLive ? 'Live regression running' : 'Live regression stopped'}</Text>
+      <Text>Plan training samples: {planTrainingCount} (captures used by KNN on this floor).</Text>
+      <Text>Trainable fingerprint rows: {planTrainableRows.length} (Save Medians + Save Live)</Text>
+      <Text>Captured points with trainable rows: {capturedPointCount}</Text>
+      <Text>Trained point locations: {trainedPointCount}</Text>
+      {planTrainingCount < 4 || trainedPointCount < 3 ? (
+        <Text style={styles.errorText}>
+          Model under-trained: collect training captures at at least 3-4 different points for stable live tracking.
+        </Text>
+      ) : null}
+      <Text>{positioning.isLiveRunning ? 'Live regression running' : 'Live regression stopped'}</Text>
     </View>
   );
 

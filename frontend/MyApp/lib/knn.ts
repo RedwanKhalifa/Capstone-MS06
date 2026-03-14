@@ -1,5 +1,8 @@
 import { RSSI_FLOOR, type BeaconReading, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
+const MIN_STD_DBM = 4;
+const CONFIDENCE_DECAY = 1.8;
+
 type KNNCache = {
   mean: number[];
   std: number[];
@@ -18,7 +21,7 @@ export const buildKnnCache = (dataset: TrainingDataset, planID: PlanID): KNNCach
   const mean = Array.from({ length: n }, (_, j) => filtered.reduce((s, row) => s + row.vector[j], 0) / filtered.length);
   const std = Array.from({ length: n }, (_, j) => {
     const variance = filtered.reduce((s, row) => s + (row.vector[j] - mean[j]) ** 2, 0) / filtered.length;
-    return Math.sqrt(variance) + 1e-6;
+    return Math.max(Math.sqrt(variance), MIN_STD_DBM);
   });
 
   const trainX = filtered.map((row) => row.vector.map((v, j) => (v - mean[j]) / std[j]));
@@ -63,5 +66,6 @@ export const regressKnn = (
     y = prev.y + alpha * (y - prev.y);
   }
   const avgD = neighbors.reduce((s, n) => s + n.d, 0) / neighbors.length;
-  return { x, y, confidence: 1 / (1 + avgD) };
+  const confidence = Math.exp(-avgD / CONFIDENCE_DECAY);
+  return { x, y, confidence };
 };

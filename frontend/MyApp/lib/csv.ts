@@ -82,7 +82,7 @@ export const parseCsvRows = (content: string): FingerprintCsvRow[] => {
 };
 
 export const buildDataset = (rows: FingerprintCsvRow[]): TrainingDataset => {
-  const trainingRows = rows.filter((r) => r.mode.startsWith('median'));
+  const trainingRows = rows.filter((r) => r.mode.startsWith('median') || r.mode === 'live');
   const beaconKeys = Array.from(new Set(trainingRows.map((r) => `${r.major}_${r.minor}`))).sort();
   const groups = new Map<string, FingerprintCsvRow[]>();
   trainingRows.forEach((row) => {

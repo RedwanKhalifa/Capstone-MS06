@@ -1,28 +1,20 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { IndoorRoutingMap } from "@/components/indoor-navigation/indoor-routing-map";
-import { subscribeLivePosition, type LivePosition } from "@/services/positioning-adapter";
+import { usePositioning } from "@/context/positioning";
+
+const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
 
 export default function IndoorNavigationScreen() {
   const router = useRouter();
+  const positioning = usePositioning();
+  const currentPosition = positioning.prediction ?? FALLBACK_POSITION;
   const params = useLocalSearchParams<{ destination?: string }>();
   const requestedDestination =
     typeof params.destination === "string" ? params.destination : undefined;
-
-  const [currentPosition, setCurrentPosition] = useState<LivePosition>({
-    x: 0.82,
-    y: 0.42,
-    timestamp: Date.now(),
-    planId: "ENG4_NORTH",
-  });
   const [routeNodeIds, setRouteNodeIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeLivePosition(setCurrentPosition, 700);
-    return unsubscribe;
-  }, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
