@@ -7,10 +7,21 @@ const DATASET_FILE = `${FileSystem.documentDirectory}dataset.json`;
 const POSITIONING_PROJECT_FILE = `${FileSystem.documentDirectory}positioning-project.json`;
 const POSITIONING_MODE_FILE = `${FileSystem.documentDirectory}positioning-mode.json`;
 const ROUTING_GRAPH_FILE = `${FileSystem.documentDirectory}routing-graph.json`;
+const FINGERPRINT_SETS_FILE = `${FileSystem.documentDirectory}fingerprint-sets.json`;
 
 type PositioningProject = {
   points: AnchorPoint[];
   dataset: TrainingDataset;
+};
+
+export type FingerprintSetSnapshot = PositioningProject;
+
+export type FingerprintSet = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  snapshot: FingerprintSetSnapshot;
 };
 
 export type PositioningMode = 'bluetooth' | 'manual';
@@ -103,3 +114,111 @@ export const loadRoutingGraph = async (fallback: RoutingGraph): Promise<RoutingG
 
 export const saveRoutingGraph = (graph: RoutingGraph) =>
   writeJson(ROUTING_GRAPH_FILE, graph);
+
+export const loadFingerprintSets = async (): Promise<FingerprintSet[]> => {
+  const sets = await readJson<FingerprintSet[] | null>(FINGERPRINT_SETS_FILE, null);
+  if (!Array.isArray(sets)) return [];
+  return sets.filter((set) =>
+    !!set &&
+    typeof set.id === 'string' &&
+    typeof set.name === 'string' &&
+    !!set.snapshot &&
+    Array.isArray(set.snapshot.points) &&
+    !!set.snapshot.dataset
+  );
+};
+
+export const saveFingerprintSet = async (
+  name: string,
+  snapshot: FingerprintSetSnapshot
+): Promise<FingerprintSet> => {
+  const trimmedName = name.trim();
+  if (!trimmedName) throw new Error('Fingerprint set name is required.');
+
+  const now = new Date().toISOString();
+  const allSets = await loadFingerprintSets();
+  const existing = allSets.find((set) => set.name.toLowerCase() === trimmedName.toLowerCase());
+
+  const nextSet: FingerprintSet = existing
+    ? {
+        ...existing,
+        name: trimmedName,
+        updatedAt: now,
+        snapshot,
+      }
+    : {
+        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: trimmedName,
+        createdAt: now,
+        updatedAt: now,
+        snapshot,
+      };
+
+  const nextSets = existing
+    ? allSets.map((set) => (set.id === existing.id ? nextSet : set))
+    : [nextSet, ...allSets];
+
+  await writeJson(FINGERPRINT_SETS_FILE, nextSets);
+  return nextSet;
+};
+
+export const deleteFingerprintSet = async (id: string): Promise<boolean> => {
+  const allSets = await loadFingerprintSets();
+  const next = allSets.filter((set) => set.id !== id);
+  if (next.length === allSets.length) return false;
+  await writeJson(FINGERPRINT_SETS_FILE, next);
+  return true;
+};
+
+export const renameFingerprintSet = async (id: string, nextName: string): Promise<FingerprintSet> => {
+  const trimmed = nextName.trim();
+  if (!trimmed) throw new Error('Fingerprint set name is required.');
+
+  const allSets = await loadFingerprintSets();
+  const target = allSets.find((set) => set.id === id);
+  if (!target) throw new Error('Fingerprint set not found.');
+
+  const duplicate = allSets.find(
+    (set) => set.id !== id && set.name.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (duplicate) throw new Error('A fingerprint set with this name already exists.');
+
+  const renamed: FingerprintSet = {
+    ...target,
+    name: trimmed,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const nextSets = allSets.map((set) => (set.id === id ? renamed : set));
+  await writeJson(FINGERPRINT_SETS_FILE, nextSets);
+  return renamed;
+};
+
+export const overwriteFingerprintSet = async (
+  id: string,
+  snapshot: FingerprintSetSnapshot,
+  nextName?: string
+): Promise<FingerprintSet> => {
+  const allSets = await loadFingerprintSets();
+  const target = allSets.find((set) => set.id === id);
+  if (!target) throw new Error('Fingerprint set not found.');
+
+  const resolvedName = (nextName ?? target.name).trim();
+  if (!resolvedName) throw new Error('Fingerprint set name is required.');
+
+  const duplicate = allSets.find(
+    (set) => set.id !== id && set.name.toLowerCase() === resolvedName.toLowerCase()
+  );
+  if (duplicate) throw new Error('A fingerprint set with this name already exists.');
+
+  const overwritten: FingerprintSet = {
+    ...target,
+    name: resolvedName,
+    updatedAt: new Date().toISOString(),
+    snapshot,
+  };
+
+  const nextSets = allSets.map((set) => (set.id === id ? overwritten : set));
+  await writeJson(FINGERPRINT_SETS_FILE, nextSets);
+  return overwritten;
+};

@@ -68,7 +68,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>TMU SMART{"\\n"}CAMPUS NAVIGATION</Text>
+          <Text style={styles.title}>TMU SMART{"\n"}CAMPUS NAVIGATION</Text>
         </View>
         <Pressable style={styles.profileButton} onPress={() => router.push("/settings")}>
           <IconSymbol name="person.circle" color="#0b0b0b" size={32} />
@@ -90,6 +90,11 @@ export default function HomeScreen() {
             <IconSymbol name="microphone" color="#4a4a4a" size={20} />
           </Pressable>
         </View>
+
+        <Pressable style={styles.quickIndoorButton} onPress={() => router.push("/indoor")}>
+          <IconSymbol name="figure.walk" color="#f3d400" size={20} />
+          <Text style={styles.quickIndoorButtonText}>Go to Indoor Navigation</Text>
+        </Pressable>
 
         {!!selectedBuilding && (
           <View style={styles.detailCard}>
@@ -239,6 +244,22 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: "#2b2b2b",
+  },
+  quickIndoorButton: {
+    marginTop: 10,
+    backgroundColor: "#1c2b85",
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  quickIndoorButtonText: {
+    color: "#f3d400",
+    fontWeight: "700",
+    fontSize: 15,
   },
   accessibilityButton: {
     position: "absolute",

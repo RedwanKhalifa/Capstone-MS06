@@ -4,15 +4,31 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 
 import { FloorplanCanvas } from '@/components/maps/floorplan-canvas';
 import { usePositioning } from '@/context/positioning';
-import { buildDataset, exportRowsCsv, importCsvText, parseCsvRows } from '@/lib/csv';
+import { buildDataset } from '@/lib/csv';
 import { requestBlePermissions } from '@/lib/permissions';
-import { loadPositioningProject, savePositioningProject } from '@/lib/storage';
+import {
+    deleteFingerprintSet,
+    loadFingerprintSets,
+    loadPositioningProject,
+    overwriteFingerprintSet,
+    renameFingerprintSet,
+    saveFingerprintSet,
+    savePositioningProject,
+    type FingerprintSet,
+} from '@/lib/storage';
 import { FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
+type FingerprintSetSort = 'newest' | 'oldest' | 'name';
+
 const STALE_AFTER_MS = 6000;
+const PLAN_NUDGE_DEFAULT_STEP = 0.0025;
+const PLAN_NUDGE_STEPS = [0.001, 0.0025, 0.005] as const;
+const HOLD_INTERVAL_MS = 120;
+const HOLD_START_DELAY_MS = 220;
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -31,15 +47,27 @@ export default function PositioningSetupScreen() {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
+  const [planNudgeStep, setPlanNudgeStep] = useState<number>(PLAN_NUDGE_DEFAULT_STEP);
   const [captureWindow, setCaptureWindow] = useState('3');
   const [isCapturing, setIsCapturing] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [medians, setMedians] = useState<Record<string, number>>({});
+
+  const [fingerprintSetName, setFingerprintSetName] = useState('');
+  const [savedFingerprintSets, setSavedFingerprintSets] = useState<FingerprintSet[]>([]);
+  const [showSavedFingerprintSets, setShowSavedFingerprintSets] = useState(false);
+  const [activeFingerprintSetId, setActiveFingerprintSetId] = useState<string | null>(null);
+  const [fingerprintSetSort, setFingerprintSetSort] = useState<FingerprintSetSort>('newest');
+  const [renamingSetId, setRenamingSetId] = useState<string | null>(null);
+  const [renamingSetName, setRenamingSetName] = useState('');
+
   const positioning = usePositioning();
 
   const buffers = useRef<Record<string, number[]>>({});
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Ref so the capture-loop closure always reads the latest beacons.
+  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdStartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isRepeatingRef = useRef(false);
   const latestBeaconsRef = useRef(positioning.beacons);
 
   useEffect(() => {
@@ -70,6 +98,7 @@ export default function PositioningSetupScreen() {
   const selectedPlan = FLOOR_PLANS.find((p) => p.id === selectedPlanID)!;
   const planPoints = useMemo(() => points.filter((p) => p.planID === selectedPlanID), [points, selectedPlanID]);
   const selectedPoint = planPoints.find((p) => p.id === selectedPointId) ?? null;
+
   const planSamples = dataset.samples.filter((s) => s.planID === selectedPlanID);
   const planTrainingCount = planSamples.length;
   const trainedPointCount = new Set(planSamples.map((s) => `${s.xNorm.toFixed(4)}|${s.yNorm.toFixed(4)}`)).size;
@@ -77,6 +106,17 @@ export default function PositioningSetupScreen() {
     (r) => r.planID === selectedPlanID && (r.mode.startsWith('median') || r.mode === 'live')
   );
   const capturedPointCount = new Set(planTrainableRows.map((r) => r.pointID)).size;
+
+  const visibleFingerprintSets = useMemo(() => {
+    const list = [...savedFingerprintSets];
+    if (fingerprintSetSort === 'name') {
+      return list.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    if (fingerprintSetSort === 'oldest') {
+      return list.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+    }
+    return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [savedFingerprintSets, fingerprintSetSort]);
 
   useEffect(() => {
     latestBeaconsRef.current = positioning.beacons;
@@ -179,13 +219,102 @@ export default function PositioningSetupScreen() {
     );
   };
 
-  const importCsv = async () => {
-    const txt = await importCsvText();
-    if (!txt) return;
-    const rows = parseCsvRows(txt);
-    const next = buildDataset(rows);
-    setDataset(next);
-    Alert.alert('Imported', `${rows.length} CSV rows loaded, ${next.samples.length} sample vectors built.`);
+  const loadSavedFingerprintSets = async () => {
+    const sets = await loadFingerprintSets();
+    setSavedFingerprintSets(sets);
+  };
+
+  const saveFingerprints = async () => {
+    const autoName = `ENG4 ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+    const name = fingerprintSetName.trim() || autoName;
+    const saved = await saveFingerprintSet(name, { points, dataset });
+    setActiveFingerprintSetId(saved.id);
+    setFingerprintSetName(saved.name);
+    await loadSavedFingerprintSets();
+    setShowSavedFingerprintSets(true);
+    Alert.alert('Saved', `Fingerprint set "${saved.name}" saved in app storage.`);
+  };
+
+  const overwriteActiveFingerprints = async () => {
+    if (!activeFingerprintSetId) {
+      Alert.alert('No active dataset', 'Open a fingerprint set first, then use Overwrite Save.');
+      return;
+    }
+    const preferredName = fingerprintSetName.trim();
+    try {
+      const updated = await overwriteFingerprintSet(
+        activeFingerprintSetId,
+        { points, dataset },
+        preferredName || undefined
+      );
+      setFingerprintSetName(updated.name);
+      await loadSavedFingerprintSets();
+      setShowSavedFingerprintSets(true);
+      Alert.alert('Overwritten', `Updated "${updated.name}".`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to overwrite fingerprint set.';
+      Alert.alert('Overwrite failed', message);
+    }
+  };
+
+  const openFingerprints = async (set: FingerprintSet) => {
+    setPoints(set.snapshot.points);
+    setDataset(set.snapshot.dataset);
+    setSelectedPointId(null);
+    setActiveFingerprintSetId(set.id);
+    setFingerprintSetName(set.name);
+    setShowSavedFingerprintSets(false);
+    setRenamingSetId(null);
+    setRenamingSetName('');
+    Alert.alert(
+      'Opened',
+      `Loaded "${set.name}" with ${set.snapshot.points.length} points and ${set.snapshot.dataset.rows.length} rows.`
+    );
+  };
+
+  const removeFingerprints = async (set: FingerprintSet) => {
+    const deleted = await deleteFingerprintSet(set.id);
+    if (!deleted) {
+      Alert.alert('Delete failed', 'Fingerprint set was not found.');
+      return;
+    }
+    await loadSavedFingerprintSets();
+    if (activeFingerprintSetId === set.id) {
+      setActiveFingerprintSetId(null);
+    }
+    if (fingerprintSetName.trim().toLowerCase() === set.name.toLowerCase()) {
+      setFingerprintSetName('');
+    }
+    if (renamingSetId === set.id) {
+      setRenamingSetId(null);
+      setRenamingSetName('');
+    }
+  };
+
+  const startRenameFingerprints = (set: FingerprintSet) => {
+    setRenamingSetId(set.id);
+    setRenamingSetName(set.name);
+  };
+
+  const commitRenameFingerprints = async () => {
+    if (!renamingSetId) return;
+    const nextName = renamingSetName.trim();
+    if (!nextName) {
+      Alert.alert('Rename failed', 'Please provide a non-empty dataset name.');
+      return;
+    }
+    try {
+      const renamed = await renameFingerprintSet(renamingSetId, nextName);
+      await loadSavedFingerprintSets();
+      if (activeFingerprintSetId === renamed.id) {
+        setFingerprintSetName(renamed.name);
+      }
+      setRenamingSetId(null);
+      setRenamingSetName('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to rename fingerprint set.';
+      Alert.alert('Rename failed', message);
+    }
   };
 
   const addNewPoint = () => {
@@ -203,6 +332,56 @@ export default function PositioningSetupScreen() {
   const onDragPoint = (pointId: string, xNorm: number, yNorm: number) => {
     setPoints((prev) => prev.map((p) => (p.id === pointId ? { ...p, xNorm, yNorm } : p)));
   };
+
+  const nudgeSelectedPoint = (dx: number, dy: number) => {
+    if (!selectedPointId) return;
+    setPoints((prev) =>
+      prev.map((p) =>
+        p.id === selectedPointId
+          ? {
+              ...p,
+              xNorm: clamp01(p.xNorm + dx),
+              yNorm: clamp01(p.yNorm + dy),
+            }
+          : p
+      )
+    );
+  };
+
+  const stopNudgeHold = () => {
+    if (holdStartRef.current) {
+      clearTimeout(holdStartRef.current);
+      holdStartRef.current = null;
+    }
+    if (holdTimerRef.current) {
+      clearInterval(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
+  const beginNudgeHold = (dx: number, dy: number) => {
+    stopNudgeHold();
+    isRepeatingRef.current = false;
+    holdStartRef.current = setTimeout(() => {
+      isRepeatingRef.current = true;
+      nudgeSelectedPoint(dx, dy);
+      holdTimerRef.current = setInterval(() => {
+        nudgeSelectedPoint(dx, dy);
+      }, HOLD_INTERVAL_MS);
+    }, HOLD_START_DELAY_MS);
+  };
+
+  const endNudgeHold = () => {
+    stopNudgeHold();
+    isRepeatingRef.current = false;
+  };
+
+  const tapNudge = (dx: number, dy: number) => {
+    if (isRepeatingRef.current) return;
+    nudgeSelectedPoint(dx, dy);
+  };
+
+  useEffect(() => endNudgeHold, []);
 
   const handleLiveStart = async () => {
     try {
@@ -234,13 +413,16 @@ export default function PositioningSetupScreen() {
       <Text style={styles.sectionTitle}>Collect Fingerprints</Text>
       <TextInput style={styles.input} value={positioning.uuid} onChangeText={positioning.setUuid} placeholder="Beacon UUID" autoCapitalize="none" />
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rowWrap}>
-        {planPoints.map((p) => (
-          <Pressable key={p.id} style={[styles.chip, p.id === selectedPointId && styles.chipActive]} onPress={() => setSelectedPointId(p.id)}>
-            <Text>{p.name}</Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <View style={styles.mapContainer}>
+        <FloorplanCanvas
+          imageSource={selectedPlan.image}
+          points={planPoints}
+          selectedPointId={selectedPointId}
+          showPointLabels
+          onSelectPoint={setSelectedPointId}
+        />
+      </View>
+      <Text style={styles.hint}>Double tap a point on the map to select it for capture. Use pan/zoom to navigate.</Text>
       <Text>{selectedPoint ? `Selected: (${selectedPoint.xNorm.toFixed(3)}, ${selectedPoint.yNorm.toFixed(3)})` : 'No point selected'}</Text>
 
       <Text style={styles.hint}>Perm requests Android BLE/location runtime permissions (Scan/Connect/Fine Location).</Text>
@@ -262,11 +444,124 @@ export default function PositioningSetupScreen() {
         <Pressable style={styles.btnOutline} onPress={captureSnapshot}><Text>Save Live</Text></Pressable>
       </View>
 
+      <TextInput
+        style={styles.input}
+        value={fingerprintSetName}
+        onChangeText={setFingerprintSetName}
+        placeholder="Fingerprint set name"
+      />
+      {activeFingerprintSetId ? (
+        <Text style={styles.hint}>Active save target loaded. Use Overwrite Save to update it.</Text>
+      ) : null}
+
       <View style={styles.rowWrap}>
-        <Pressable style={styles.btnOutline} onPress={() => exportRowsCsv(dataset.rows)}><Text>Export CSV</Text></Pressable>
-        <Pressable style={styles.btnOutline} onPress={importCsv}><Text>Import CSV</Text></Pressable>
+        <Pressable style={styles.btnOutline} onPress={saveFingerprints}><Text>Save Fingerprints</Text></Pressable>
+        {activeFingerprintSetId ? (
+          <Pressable style={styles.btnOutline} onPress={overwriteActiveFingerprints}>
+            <Text>Overwrite Save</Text>
+          </Pressable>
+        ) : null}
+        <Pressable
+          style={styles.btnOutline}
+          onPress={async () => {
+            await loadSavedFingerprintSets();
+            setShowSavedFingerprintSets((current) => !current);
+          }}>
+          <Text>Open Fingerprints</Text>
+        </Pressable>
         <Pressable style={styles.btnDanger} onPress={() => setDataset({ beaconKeys: [], samples: [], rows: [] })}><Text style={styles.btnText}>Clear dataset</Text></Pressable>
       </View>
+
+      {showSavedFingerprintSets ? (
+        <View style={styles.savedSetsPanel}>
+          <View style={styles.rowWrap}>
+            <Text style={styles.savedSetMeta}>Sort:</Text>
+            <Pressable
+              style={[styles.chip, fingerprintSetSort === 'newest' && styles.chipActive]}
+              onPress={() => setFingerprintSetSort('newest')}>
+              <Text>Newest</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.chip, fingerprintSetSort === 'oldest' && styles.chipActive]}
+              onPress={() => setFingerprintSetSort('oldest')}>
+              <Text>Oldest</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.chip, fingerprintSetSort === 'name' && styles.chipActive]}
+              onPress={() => setFingerprintSetSort('name')}>
+              <Text>Name</Text>
+            </Pressable>
+          </View>
+          {savedFingerprintSets.length === 0 ? (
+            <Text style={styles.hint}>No saved fingerprint sets yet.</Text>
+          ) : (
+            visibleFingerprintSets.map((set) => (
+              <View key={set.id} style={styles.savedSetRow}>
+                <View style={styles.savedSetInfo}>
+                  <View style={styles.savedSetHeader}>
+                    {renamingSetId === set.id ? (
+                      <TextInput
+                        style={styles.input}
+                        value={renamingSetName}
+                        onChangeText={setRenamingSetName}
+                        placeholder="Rename dataset"
+                      />
+                    ) : (
+                      <Text style={styles.savedSetName}>{set.name}</Text>
+                    )}
+                    {activeFingerprintSetId === set.id ? (
+                      <View style={styles.activeBadge}>
+                        <Text style={styles.activeBadgeText}>Active</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.savedSetMeta}>
+                    {set.snapshot.points.length} points • {set.snapshot.dataset.rows.length} rows • updated {new Date(set.updatedAt).toLocaleString()}
+                  </Text>
+                </View>
+                <Pressable style={styles.btnOutline} onPress={() => void openFingerprints(set)}>
+                  <Text>Open</Text>
+                </Pressable>
+                {renamingSetId === set.id ? (
+                  <>
+                    <Pressable style={styles.btnOutline} onPress={() => void commitRenameFingerprints()}>
+                      <Text>Save Name</Text>
+                    </Pressable>
+                    <Pressable
+                      style={styles.btnOutline}
+                      onPress={() => {
+                        setRenamingSetId(null);
+                        setRenamingSetName('');
+                      }}>
+                      <Text>Cancel</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <Pressable style={styles.btnOutline} onPress={() => startRenameFingerprints(set)}>
+                    <Text>Rename</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={styles.btnDanger}
+                  onPress={() => {
+                    Alert.alert('Delete dataset?', `Delete "${set.name}"?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Delete',
+                        style: 'destructive',
+                        onPress: () => {
+                          void removeFingerprints(set);
+                        },
+                      },
+                    ]);
+                  }}>
+                  <Text style={styles.btnText}>Delete</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+        </View>
+      ) : null}
 
       <Text>Rows: {dataset.rows.length} • Samples: {dataset.samples.length} • Features: {dataset.beaconKeys.length}</Text>
       {Object.entries(medians).map(([k, r]) => <Text key={k}>median {k}: {r}</Text>)}
@@ -310,15 +605,6 @@ export default function PositioningSetupScreen() {
           style={[styles.chip, positioning.liveMode === 'bluetooth' && styles.chipActive]}
           onPress={() => positioning.setLiveMode('bluetooth')}>
           <Text>Bluetooth mode</Text>
-        </Pressable>
-        <Pressable
-          style={styles.btnOutline}
-          disabled={!selectedPoint}
-          onPress={() => {
-            if (!selectedPoint) return;
-            setManualLivePosition(selectedPoint.xNorm, selectedPoint.yNorm);
-          }}>
-          <Text>{selectedPoint ? `Use ${selectedPoint.name}` : 'Select point in Collect/Plans'}</Text>
         </Pressable>
       </View>
 
@@ -364,18 +650,73 @@ export default function PositioningSetupScreen() {
   const renderPlans = () => (
     <View style={styles.sectionCard}>
       <Text style={styles.sectionTitle}>Plan Points (ENG4 North)</Text>
+      {selectedPoint ? (
+        <View style={styles.topMapActions}>
+          <Pressable style={styles.btnOutline} onPress={() => setSelectedPointId(null)}>
+            <Text>Deselect</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <View style={styles.mapContainer}>
         <FloorplanCanvas
           imageSource={selectedPlan.image}
           points={planPoints}
           selectedPointId={selectedPointId}
+          showPointLabels
+          onSelectPoint={setSelectedPointId}
           dragPointId={selectedPointId}
           onDragPoint={onDragPoint}
         />
       </View>
 
       <Pressable style={styles.btn} onPress={addNewPoint}><Text style={styles.btnText}>Add New Point</Text></Pressable>
-      <Text style={styles.hint}>New points appear at map center. Select a point and drag on map to place it.</Text>
+      <Text style={styles.hint}>Tap a point to select it. While selected, tap the map to move it. Deselect to pan/zoom the map.</Text>
+
+      {selectedPoint ? (
+        <View style={styles.nudgeWrap}>
+          <Text style={styles.hint}>Nudge {selectedPoint.name}</Text>
+          <Pressable
+            style={styles.dpadBtn}
+            onPressIn={() => beginNudgeHold(0, -planNudgeStep)}
+            onPressOut={endNudgeHold}
+            onPress={() => tapNudge(0, -planNudgeStep)}>
+            <Text style={styles.dpadText}>Up</Text>
+          </Pressable>
+          <View style={styles.dpadRow}>
+            <Pressable
+              style={styles.dpadBtn}
+              onPressIn={() => beginNudgeHold(-planNudgeStep, 0)}
+              onPressOut={endNudgeHold}
+              onPress={() => tapNudge(-planNudgeStep, 0)}>
+              <Text style={styles.dpadText}>Left</Text>
+            </Pressable>
+            <Pressable
+              style={styles.dpadBtn}
+              onPressIn={() => beginNudgeHold(planNudgeStep, 0)}
+              onPressOut={endNudgeHold}
+              onPress={() => tapNudge(planNudgeStep, 0)}>
+              <Text style={styles.dpadText}>Right</Text>
+            </Pressable>
+          </View>
+          <Pressable
+            style={styles.dpadBtn}
+            onPressIn={() => beginNudgeHold(0, planNudgeStep)}
+            onPressOut={endNudgeHold}
+            onPress={() => tapNudge(0, planNudgeStep)}>
+            <Text style={styles.dpadText}>Down</Text>
+          </Pressable>
+          <View style={styles.rowWrap}>
+            {PLAN_NUDGE_STEPS.map((step) => (
+              <Pressable
+                key={step}
+                style={[styles.chip, planNudgeStep === step && styles.chipActive]}
+                onPress={() => setPlanNudgeStep(step)}>
+                <Text>{step.toFixed(4)}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ) : null}
 
       {selectedPoint ? (
         <TextInput
@@ -388,7 +729,6 @@ export default function PositioningSetupScreen() {
       ) : null}
 
       <View style={styles.rowWrap}>
-        <Pressable style={styles.btnOutline} onPress={() => setSelectedPointId(null)}><Text>Deselect</Text></Pressable>
         <Pressable style={styles.btnDanger} onPress={() => setPoints((prev) => prev.filter((p) => p.id !== selectedPointId))}><Text style={styles.btnText}>Delete</Text></Pressable>
         <Pressable style={styles.btnDanger} onPress={() => setPoints((prev) => prev.filter((p) => p.planID !== selectedPlanID))}><Text style={styles.btnText}>Clear plan points</Text></Pressable>
       </View>
@@ -443,6 +783,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   sectionTitle: { fontWeight: '700', fontSize: 16, color: '#2c3ea3' },
+  topMapActions: { alignItems: 'flex-end' },
   mapContainer: { height: 320 },
   rowWrap: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
   chip: { borderWidth: 1, borderColor: '#94a3b8', borderRadius: 8, padding: 8, backgroundColor: '#fff' },
@@ -462,5 +803,70 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
     borderRadius: 8,
     padding: 10,
+  },
+  nudgeWrap: {
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  dpadRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dpadBtn: {
+    minWidth: 70,
+    borderWidth: 1,
+    borderColor: '#2c3ea3',
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  dpadText: {
+    color: '#2c3ea3',
+    fontWeight: '700',
+  },
+  savedSetsPanel: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 10,
+    backgroundColor: '#f8fafc',
+    padding: 10,
+    gap: 8,
+  },
+  savedSetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  savedSetInfo: {
+    flex: 1,
+  },
+  savedSetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  savedSetName: {
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  savedSetMeta: {
+    color: '#475569',
+    fontSize: 12,
+  },
+  activeBadge: {
+    borderWidth: 1,
+    borderColor: '#1d4ed8',
+    backgroundColor: '#dbeafe',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  activeBadgeText: {
+    color: '#1d4ed8',
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

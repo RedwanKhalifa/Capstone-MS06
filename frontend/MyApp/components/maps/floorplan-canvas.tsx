@@ -1,9 +1,9 @@
 import { Image as ExpoImage } from 'expo-image';
 import React, { useEffect, useState } from 'react';
-import { LayoutChangeEvent, Image as RNImage, StyleSheet, View } from 'react-native';
+import { LayoutChangeEvent, Image as RNImage, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
-import Svg, { Circle as SvgCircle, Polyline } from 'react-native-svg';
+import Svg, { Polyline, Circle as SvgCircle } from 'react-native-svg';
 
 import type { AnchorPoint } from '@/types/fingerprint';
 
@@ -20,6 +20,9 @@ type Props = {
   onAddPoint?: (xNorm: number, yNorm: number) => void;
   dragPointId?: string | null;
   onDragPoint?: (pointId: string, xNorm: number, yNorm: number) => void;
+  onSelectPoint?: (pointId: string) => void;
+  /** Show compact labels (e.g., point numbers) beside anchors. */
+  showPointLabels?: boolean;
   /** When true the camera smoothly tracks liveDot as it moves. */
   followDot?: boolean;
   /** Called when the user manually pans or pinches, breaking auto-follow. */
@@ -29,6 +32,10 @@ type Props = {
 };
 
 const clamp = (n: number) => Math.max(0, Math.min(1, n));
+const pointLabelNumber = (name: string) => {
+  const digits = name.match(/\d+/g);
+  return digits ? digits.join('') : name;
+};
 
 export function FloorplanCanvas({
   imageSource,
@@ -41,6 +48,8 @@ export function FloorplanCanvas({
   onAddPoint,
   dragPointId,
   onDragPoint,
+  onSelectPoint,
+  showPointLabels = false,
   followDot = false,
   onUserInteraction,
   recenterTrigger,
@@ -92,11 +101,19 @@ export function FloorplanCanvas({
 
   const notifyInteraction = () => { if (onUserInteraction) onUserInteraction(); };
 
+  function toNorm(x: number, y: number) {
+    const localX = (x - size.w / 2 - tx.value) / scale.value + baseW / 2;
+    const localY = (y - size.h / 2 - ty.value) / scale.value + baseH / 2;
+    return { xNorm: clamp(localX / baseW), yNorm: clamp(localY / baseH) };
+  }
+
   const panMap = Gesture.Pan()
-    .onStart(() => {
+    .runOnJS(true)
+    .maxPointers(1)
+    .onStart((e) => {
       startTx.value = tx.value;
       startTy.value = ty.value;
-      runOnJS(notifyInteraction)();
+      notifyInteraction();
     })
     .onUpdate((e) => {
       tx.value = startTx.value + e.translationX;
@@ -112,12 +129,6 @@ export function FloorplanCanvas({
       scale.value = Math.max(0.7, Math.min(maxScale, startScale.value * e.scale));
     });
 
-  const toNorm = (x: number, y: number) => {
-    const localX = (x - size.w / 2 - tx.value) / scale.value + baseW / 2;
-    const localY = (y - size.h / 2 - ty.value) / scale.value + baseH / 2;
-    return { xNorm: clamp(localX / baseW), yNorm: clamp(localY / baseH) };
-  };
-
   const tapAdd = Gesture.Tap()
     .runOnJS(true)
     .onEnd((e, success) => {
@@ -126,19 +137,41 @@ export function FloorplanCanvas({
       onAddPoint(p.xNorm, p.yNorm);
     });
 
-  const dragPoint = Gesture.Pan()
+  const tapSelect = Gesture.Tap()
     .runOnJS(true)
-    .onUpdate((e) => {
-      if (!dragPointId || !onDragPoint) return;
+    .numberOfTaps(2)
+    .onEnd((e, success) => {
+      if (!success || !onSelectPoint || !points.length) return;
+      const p = toNorm(e.x, e.y);
+      let bestId: string | null = null;
+      let bestD2 = Number.POSITIVE_INFINITY;
+      for (const point of points) {
+        const dx = (point.xNorm - p.xNorm) * baseW;
+        const dy = (point.yNorm - p.yNorm) * baseH;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          bestId = point.id;
+        }
+      }
+      if (bestId && bestD2 <= 24 * 24) {
+        onSelectPoint(bestId);
+      }
+    });
+
+  const tapMoveSelected = Gesture.Tap()
+    .runOnJS(true)
+    .onEnd((e, success) => {
+      if (!success || !dragPointId || !onDragPoint) return;
       const p = toNorm(e.x, e.y);
       onDragPoint(dragPointId, p.xNorm, p.yNorm);
     });
 
   const gesture = dragPointId && onDragPoint
-    ? Gesture.Simultaneous(pinch, dragPoint)
-    : canAddPoint
-      ? Gesture.Simultaneous(panMap, pinch, tapAdd)
-      : Gesture.Simultaneous(panMap, pinch);
+      ? tapMoveSelected
+      : canAddPoint
+        ? Gesture.Simultaneous(panMap, pinch, tapAdd, tapSelect)
+        : Gesture.Simultaneous(panMap, pinch, tapSelect);
 
   const onLayout = (e: LayoutChangeEvent) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height });
 
@@ -190,7 +223,11 @@ export function FloorplanCanvas({
             ) : null}
             {points.map((p) => (
               <View key={p.id} style={[styles.markerSlot, { left: p.xNorm * baseW - 9, top: p.yNorm * baseH - 9 }]}>
-                <Animated.View style={[styles.marker, p.id === selectedPointId && styles.markerSelected, markerStyle]} />
+                <Animated.View style={[styles.marker, p.id === selectedPointId && styles.markerSelected, markerStyle]}>
+                  {showPointLabels ? (
+                    <Text style={styles.markerText}>{pointLabelNumber(p.name)}</Text>
+                  ) : null}
+                </Animated.View>
               </View>
             ))}
             {liveDot ? (
@@ -224,8 +261,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#22c55e',
     borderWidth: 2,
     borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  markerSelected: { backgroundColor: '#16a34a' },
+  markerSelected: { backgroundColor: '#dc2626' },
+  markerText: {
+    color: '#ffffff',
+    fontSize: 9,
+    fontWeight: '700',
+    lineHeight: 10,
+    textAlign: 'center',
+  },
   liveDot: {
     width: 20,
     height: 20,
