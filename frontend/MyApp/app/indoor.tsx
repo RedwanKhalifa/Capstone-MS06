@@ -61,29 +61,9 @@ export default function IndoorNavigationScreen() {
       <View style={styles.mapContainer}>
         <IndoorRoutingMap destination={requestedDestination} onRouteComputed={setRouteNodeIds} />
       </View>
-      {requestedDestination ? <Text style={styles.destLabel}>Destination: {requestedDestination}</Text> : null}
-      {routeNodeIds.length > 1 ? (
-        <Text style={styles.routeLabel}>Dijkstra route: {routeNodeIds.join(" -> ")}</Text>
-      ) : null}
 
       <View style={styles.metaCard}>
         <Text style={styles.metaTitle}>Manual D-Pad (Testing)</Text>
-        <Text style={styles.hintText}>Pressing any direction switches to manual position mode.</Text>
-        <Text style={styles.hintText}>Step size: {manualStep.toFixed(3)} normalized units</Text>
-        <Text style={styles.hintText}>Mode: {positioning.liveMode.toUpperCase()}</Text>
-
-        <View style={styles.stepRow}>
-          {STEP_OPTIONS.map((step) => (
-            <Pressable
-              key={step}
-              style={[styles.stepChip, manualStep === step && styles.stepChipActive]}
-              onPress={() => setManualStep(step)}>
-              <Text style={manualStep === step ? styles.stepChipTextActive : styles.stepChipText}>
-                {step.toFixed(3)}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
 
         <View style={styles.dpadWrap}>
           <Pressable
@@ -115,7 +95,29 @@ export default function IndoorNavigationScreen() {
             <Text style={styles.dpadText}>Down</Text>
           </Pressable>
         </View>
+
+        <View style={styles.stepRow}>
+          {STEP_OPTIONS.map((step) => (
+            <Pressable
+              key={step}
+              style={[styles.stepChip, manualStep === step && styles.stepChipActive]}
+              onPress={() => setManualStep(step)}>
+              <Text style={manualStep === step ? styles.stepChipTextActive : styles.stepChipText}>
+                {step.toFixed(3)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.hintText}>Pressing any direction switches to manual position mode.</Text>
+        <Text style={styles.hintText}>Step size: {manualStep.toFixed(3)} normalized units</Text>
+        <Text style={styles.hintText}>Mode: {positioning.liveMode.toUpperCase()}</Text>
       </View>
+
+      {requestedDestination ? <Text style={styles.destLabel}>Destination: {requestedDestination}</Text> : null}
+      {routeNodeIds.length > 1 ? (
+        <Text style={styles.routeLabel}>Dijkstra route: {routeNodeIds.join(" -> ")}</Text>
+      ) : null}
 
       <View style={styles.metaCard}>
         <Text style={styles.metaTitle}>Live Position</Text>
