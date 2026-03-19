@@ -6,6 +6,7 @@ const POINTS_FILE = `${FileSystem.documentDirectory}anchor-points.json`;
 const DATASET_FILE = `${FileSystem.documentDirectory}dataset.json`;
 const POSITIONING_PROJECT_FILE = `${FileSystem.documentDirectory}positioning-project.json`;
 const POSITIONING_MODE_FILE = `${FileSystem.documentDirectory}positioning-mode.json`;
+const ROUTING_GRAPH_FILE = `${FileSystem.documentDirectory}routing-graph.json`;
 
 type PositioningProject = {
   points: AnchorPoint[];
@@ -13,6 +14,23 @@ type PositioningProject = {
 };
 
 export type PositioningMode = 'bluetooth' | 'manual';
+
+export type RoutingNode = {
+  id: string;
+  x: number;
+  y: number;
+  floor: number;
+};
+
+export type RoutingEdge = {
+  target: string;
+  weight: number;
+};
+
+export type RoutingGraph = {
+  nodes: RoutingNode[];
+  edges: Record<string, RoutingEdge[]>;
+};
 
 type PositioningModeSnapshot = {
   mode: PositioningMode;
@@ -74,3 +92,14 @@ export const loadPositioningMode = async (): Promise<PositioningMode> => {
 
 export const savePositioningMode = (mode: PositioningMode) =>
   writeJson(POSITIONING_MODE_FILE, { mode });
+
+export const loadRoutingGraph = async (fallback: RoutingGraph): Promise<RoutingGraph> => {
+  const graph = await readJson<RoutingGraph | null>(ROUTING_GRAPH_FILE, null);
+  if (!graph || !Array.isArray(graph.nodes) || typeof graph.edges !== 'object' || graph.edges == null) {
+    return fallback;
+  }
+  return graph;
+};
+
+export const saveRoutingGraph = (graph: RoutingGraph) =>
+  writeJson(ROUTING_GRAPH_FILE, graph);

@@ -7,6 +7,7 @@ import { usePositioning } from "@/context/positioning";
 
 const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
 const HOLD_INTERVAL_MS = 120;
+const HOLD_START_DELAY_MS = 220;
 const STEP_OPTIONS = [0.005, 0.01, 0.02] as const;
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -21,6 +22,8 @@ export default function IndoorNavigationScreen() {
   const [routeNodeIds, setRouteNodeIds] = useState<string[]>([]);
   const [manualStep, setManualStep] = useState<number>(0.01);
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdStartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isRepeatingRef = useRef(false);
   const currentPositionRef = useRef(currentPosition);
 
   useEffect(() => {
@@ -28,6 +31,10 @@ export default function IndoorNavigationScreen() {
   }, [currentPosition]);
 
   const stopHold = () => {
+    if (holdStartRef.current) {
+      clearTimeout(holdStartRef.current);
+      holdStartRef.current = null;
+    }
     if (!holdTimerRef.current) return;
     clearInterval(holdTimerRef.current);
     holdTimerRef.current = null;
@@ -41,14 +48,28 @@ export default function IndoorNavigationScreen() {
   };
 
   const beginHold = (dx: number, dy: number) => {
-    nudgeManual(dx, dy);
     stopHold();
-    holdTimerRef.current = setInterval(() => {
+    isRepeatingRef.current = false;
+    holdStartRef.current = setTimeout(() => {
+      isRepeatingRef.current = true;
       nudgeManual(dx, dy);
-    }, HOLD_INTERVAL_MS);
+      holdTimerRef.current = setInterval(() => {
+        nudgeManual(dx, dy);
+      }, HOLD_INTERVAL_MS);
+    }, HOLD_START_DELAY_MS);
   };
 
-  useEffect(() => stopHold, []);
+  const endHold = () => {
+    stopHold();
+    isRepeatingRef.current = false;
+  };
+
+  const tapNudge = (dx: number, dy: number) => {
+    if (isRepeatingRef.current) return;
+    nudgeManual(dx, dy);
+  };
+
+  useEffect(() => endHold, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -61,16 +82,44 @@ export default function IndoorNavigationScreen() {
       <View style={styles.mapContainer}>
         <IndoorRoutingMap destination={requestedDestination} onRouteComputed={setRouteNodeIds} />
       </View>
-      {requestedDestination ? <Text style={styles.destLabel}>Destination: {requestedDestination}</Text> : null}
-      {routeNodeIds.length > 1 ? (
-        <Text style={styles.routeLabel}>Dijkstra route: {routeNodeIds.join(" -> ")}</Text>
-      ) : null}
 
       <View style={styles.metaCard}>
         <Text style={styles.metaTitle}>Manual D-Pad (Testing)</Text>
-        <Text style={styles.hintText}>Pressing any direction switches to manual position mode.</Text>
-        <Text style={styles.hintText}>Step size: {manualStep.toFixed(3)} normalized units</Text>
-        <Text style={styles.hintText}>Mode: {positioning.liveMode.toUpperCase()}</Text>
+
+        <View style={styles.dpadWrap}>
+          <Pressable
+            style={styles.dpadBtn}
+            onPressIn={() => beginHold(0, -manualStep)}
+            onPressOut={endHold}
+            onPress={() => tapNudge(0, -manualStep)}>
+            <Text style={styles.dpadText}>Up</Text>
+          </Pressable>
+
+          <View style={styles.dpadRow}>
+            <Pressable
+              style={styles.dpadBtn}
+              onPressIn={() => beginHold(-manualStep, 0)}
+              onPressOut={endHold}
+              onPress={() => tapNudge(-manualStep, 0)}>
+              <Text style={styles.dpadText}>Left</Text>
+            </Pressable>
+            <Pressable
+              style={styles.dpadBtn}
+              onPressIn={() => beginHold(manualStep, 0)}
+              onPressOut={endHold}
+              onPress={() => tapNudge(manualStep, 0)}>
+              <Text style={styles.dpadText}>Right</Text>
+            </Pressable>
+          </View>
+
+          <Pressable
+            style={styles.dpadBtn}
+            onPressIn={() => beginHold(0, manualStep)}
+            onPressOut={endHold}
+            onPress={() => tapNudge(0, manualStep)}>
+            <Text style={styles.dpadText}>Down</Text>
+          </Pressable>
+        </View>
 
         <View style={styles.stepRow}>
           {STEP_OPTIONS.map((step) => (
@@ -85,37 +134,15 @@ export default function IndoorNavigationScreen() {
           ))}
         </View>
 
-        <View style={styles.dpadWrap}>
-          <Pressable
-            style={styles.dpadBtn}
-            onPressIn={() => beginHold(0, -manualStep)}
-            onPressOut={stopHold}>
-            <Text style={styles.dpadText}>Up</Text>
-          </Pressable>
-
-          <View style={styles.dpadRow}>
-            <Pressable
-              style={styles.dpadBtn}
-              onPressIn={() => beginHold(-manualStep, 0)}
-              onPressOut={stopHold}>
-              <Text style={styles.dpadText}>Left</Text>
-            </Pressable>
-            <Pressable
-              style={styles.dpadBtn}
-              onPressIn={() => beginHold(manualStep, 0)}
-              onPressOut={stopHold}>
-              <Text style={styles.dpadText}>Right</Text>
-            </Pressable>
-          </View>
-
-          <Pressable
-            style={styles.dpadBtn}
-            onPressIn={() => beginHold(0, manualStep)}
-            onPressOut={stopHold}>
-            <Text style={styles.dpadText}>Down</Text>
-          </Pressable>
-        </View>
+        <Text style={styles.hintText}>Pressing any direction switches to manual position mode.</Text>
+        <Text style={styles.hintText}>Step size: {manualStep.toFixed(3)} normalized units</Text>
+        <Text style={styles.hintText}>Mode: {positioning.liveMode.toUpperCase()}</Text>
       </View>
+
+      {requestedDestination ? <Text style={styles.destLabel}>Destination: {requestedDestination}</Text> : null}
+      {routeNodeIds.length > 1 ? (
+        <Text style={styles.routeLabel}>Dijkstra route: {routeNodeIds.join(" -> ")}</Text>
+      ) : null}
 
       <View style={styles.metaCard}>
         <Text style={styles.metaTitle}>Live Position</Text>

@@ -1,12 +1,20 @@
 import { usePositioning } from "@/context/positioning";
+import {
+    loadRoutingGraph,
+    saveRoutingGraph,
+    type RoutingEdge as Edge,
+    type RoutingNode as GraphNode,
+    type RoutingGraph,
+} from "@/lib/storage";
+import { Image as ExpoImage } from "expo-image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     Alert,
     Animated,
-    Button,
     Dimensions,
     Easing,
-    Image,
+    PixelRatio,
+    Image as RNImage,
     ScrollView,
     StyleSheet,
     Text,
@@ -16,18 +24,6 @@ import {
 import ImageZoom from "react-native-image-pan-zoom";
 import Svg, { Circle, G, Polyline, Text as SvgText } from "react-native-svg";
 
-type GraphNode = {
-  id: string;
-  x: number;
-  y: number;
-  floor: number;
-};
-
-type Edge = {
-  target: string;
-  weight: number;
-};
-
 type Props = {
   destination?: string;
   onRouteComputed?: (nodeIds: string[]) => void;
@@ -35,6 +31,12 @@ type Props = {
 
 const { width: screenWidth } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const NAV_FLOOR = 4;
+const CANONICAL_IMAGE_WIDTH = 800;
+const CANONICAL_IMAGE_HEIGHT = 600;
+const MIN_RENDER_WIDTH = 1200;
+const MAX_RENDER_WIDTH = 1800;
+const EDIT_STEPS = [2, 4, 8] as const;
 
 const ROOM_TO_NODE: Record<string, string> = {
   ENG103: "N12",
@@ -42,14 +44,9 @@ const ROOM_TO_NODE: Record<string, string> = {
   ENG: "N3",
 };
 
-const FLOOR_IMAGES = {
-  1: require("../../thiv-routing-algorithms/MyApp/assets/images/CampusMapEng1stFloor.png"),
-  2: require("../../thiv-routing-algorithms/MyApp/assets/images/CampusMapEng2ndFloor.png"),
-  3: require("../../thiv-routing-algorithms/MyApp/assets/images/CampusMapEng3rdFloor.png"),
-  4: require("../../thiv-routing-algorithms/MyApp/assets/images/CampusMapEng4thFloor.png"),
-} as const;
+const FLOOR_4_IMAGE = require("../../assets/images/eng4_north.png");
 
-const ALL_NODES: GraphNode[] = [
+const DEFAULT_NODES: GraphNode[] = [
   { id: "3N1", x: 455, y: 180, floor: 3 },
   { id: "3N2", x: 730, y: 180, floor: 3 },
   { id: "3N3", x: 730, y: 275, floor: 3 },
@@ -72,7 +69,7 @@ const ALL_NODES: GraphNode[] = [
   { id: "N12", x: 695, y: 385, floor: 4 },
 ];
 
-const EDGES: Record<string, Edge[]> = {
+const DEFAULT_EDGES: Record<string, Edge[]> = {
   "3N1": [{ target: "3N2", weight: 50 }, { target: "3N5", weight: 20 }],
   "3N2": [{ target: "3N1", weight: 50 }, { target: "3N3", weight: 27 }],
   "3N3": [{ target: "3N2", weight: 27 }, { target: "3N4", weight: 5 }, { target: "3N7", weight: 3 }],
@@ -93,6 +90,11 @@ const EDGES: Record<string, Edge[]> = {
   N10: [{ target: "N9", weight: 5 }, { target: "N11", weight: 15 }],
   N11: [{ target: "N10", weight: 15 }, { target: "N12", weight: 100 }],
   N12: [{ target: "N11", weight: 100 }, { target: "N1", weight: 10 }],
+};
+
+const DEFAULT_GRAPH: RoutingGraph = {
+  nodes: DEFAULT_NODES,
+  edges: DEFAULT_EDGES,
 };
 
 function dijkstra(
@@ -155,15 +157,31 @@ function nearestNodeId(nodes: GraphNode[], x: number, y: number): string | null 
 
 export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const positioning = usePositioning();
-  const imageWidth = 800;
-  const imageHeight = 600;
+  const resolvedImage = RNImage.resolveAssetSource(FLOOR_4_IMAGE);
+  const sourceWidth = resolvedImage.width || CANONICAL_IMAGE_WIDTH;
+  const sourceHeight = resolvedImage.height || CANONICAL_IMAGE_HEIGHT;
+  // Keep enough raster detail for sharpness on high-density screens without using full source size.
+  const qualityTargetWidth = Math.ceil((screenWidth - 40) * PixelRatio.get() * 2.2);
+  const renderTargetWidth = Math.min(
+    sourceWidth,
+    Math.min(MAX_RENDER_WIDTH, Math.max(qualityTargetWidth, MIN_RENDER_WIDTH))
+  );
+  const renderScale = Math.min(1, renderTargetWidth / sourceWidth);
+  const imageWidth = Math.round(sourceWidth * renderScale);
+  const imageHeight = Math.round(sourceHeight * renderScale);
+  const scaleX = imageWidth / CANONICAL_IMAGE_WIDTH;
+  const scaleY = imageHeight / CANONICAL_IMAGE_HEIGHT;
 
+  const [graph, setGraph] = useState<RoutingGraph>(DEFAULT_GRAPH);
+  const [graphLoaded, setGraphLoaded] = useState(false);
   const [floorPaths, setFloorPaths] = useState<Record<number, { x: number; y: number }[]>>({});
-  const [currentFloor, setCurrentFloor] = useState(4);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulatedFloor, setSimulatedFloor] = useState<number | null>(null);
   const [selectedStartId, setSelectedStartId] = useState<string | null>(null);
   const [selectedEndId, setSelectedEndId] = useState<string | null>("N11");
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editStep, setEditStep] = useState<number>(4);
 
   const imageZoomRef = useRef<any>(null);
   const locationAnims = useRef<Record<number, Animated.ValueXY>>({});
@@ -175,23 +193,79 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   // Cover-based min scale prevents immediate snap-back when panning.
   const minScale = Math.max(cropWidth / imageWidth, cropHeight / imageHeight);
 
+  const toRenderedPoint = (point: { x: number; y: number }) => ({
+    x: point.x * scaleX,
+    y: point.y * scaleY,
+  });
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const loaded = await loadRoutingGraph(DEFAULT_GRAPH);
+      if (!active) return;
+      setGraph(loaded);
+      setGraphLoaded(true);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!graphLoaded) return;
+    void saveRoutingGraph(graph);
+  }, [graph, graphLoaded]);
+
+  const moveEditingNode = (dx: number, dy: number) => {
+    if (!editingNodeId) return;
+    setGraph((prev) => ({
+      ...prev,
+      nodes: prev.nodes.map((node) => {
+        if (node.id !== editingNodeId) return node;
+        return {
+          ...node,
+          x: Math.max(0, Math.min(CANONICAL_IMAGE_WIDTH, node.x + dx)),
+          y: Math.max(0, Math.min(CANONICAL_IMAGE_HEIGHT, node.y + dy)),
+        };
+      }),
+    }));
+  };
+
+  const selectedEditNode = useMemo(
+    () => graph.nodes.find((n) => n.id === editingNodeId) ?? null,
+    [graph.nodes, editingNodeId]
+  );
+
+  const handleMapTap = (event: any) => {
+    if (!isEditMode) return;
+    const tapX = typeof event?.locationX === "number" ? event.locationX : event?.x;
+    const tapY = typeof event?.locationY === "number" ? event.locationY : event?.y;
+    if (typeof tapX !== "number" || typeof tapY !== "number") return;
+
+    const canonicalX = tapX / scaleX;
+    const canonicalY = tapY / scaleY;
+    const nearestId = nearestNodeId(nodesOnCurrentFloor, canonicalX, canonicalY);
+    if (nearestId) setEditingNodeId(nearestId);
+  };
+
   const nodesOnCurrentFloor = useMemo(
-    () => ALL_NODES.filter((node) => node.floor === currentFloor),
-    [currentFloor]
+    () => graph.nodes.filter((node) => node.floor === NAV_FLOOR),
+    [graph.nodes]
   );
 
   const edgesOnCurrentFloor = useMemo(() => {
     const next: Record<string, Edge[]> = {};
     nodesOnCurrentFloor.forEach((node) => {
-      next[node.id] = (EDGES[node.id] || []).filter((edge) =>
+      next[node.id] = (graph.edges[node.id] || []).filter((edge) =>
         nodesOnCurrentFloor.some((candidate) => candidate.id === edge.target)
       );
     });
     return next;
-  }, [nodesOnCurrentFloor]);
+  }, [nodesOnCurrentFloor, graph.edges]);
 
   const traversePath = (points: { x: number; y: number }[], floor: number) => {
     if (points.length < 2) return;
+    const renderedPoints = points.map(toRenderedPoint);
 
     if (animationRef.current) {
       try {
@@ -202,16 +276,16 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
     let anim = locationAnims.current[floor];
     if (!anim) {
-      anim = new Animated.ValueXY({ x: points[0].x, y: points[0].y });
+      anim = new Animated.ValueXY({ x: renderedPoints[0].x, y: renderedPoints[0].y });
       locationAnims.current[floor] = anim;
     } else {
-      anim.setValue(points[0]);
+      anim.setValue(renderedPoints[0]);
     }
 
     setIsSimulating(true);
     setSimulatedFloor(floor);
 
-    const anims = points.slice(1).map((point) =>
+    const anims = renderedPoints.slice(1).map((point) =>
       Animated.timing(anim as any, {
         toValue: point,
         duration: 1200,
@@ -229,7 +303,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   };
 
   useEffect(() => {
-    if (animationRef.current && simulatedFloor !== null && simulatedFloor !== currentFloor) {
+    if (animationRef.current && simulatedFloor !== null && simulatedFloor !== NAV_FLOOR) {
       try {
         animationRef.current.stop();
       } catch {}
@@ -243,7 +317,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         } catch {}
       }
     }
-  }, [currentFloor, simulatedFloor]);
+  }, [simulatedFloor]);
 
   useEffect(() => {
     if (!destination) return;
@@ -251,12 +325,11 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     const mappedEnd = ROOM_TO_NODE[destination];
     if (!mappedEnd) return;
 
-    const endNode = ALL_NODES.find((node) => node.id === mappedEnd);
-    if (!endNode) return;
+    const endNode = graph.nodes.find((node) => node.id === mappedEnd);
+    if (!endNode || endNode.floor !== NAV_FLOOR) return;
 
     setSelectedEndId(mappedEnd);
-    setCurrentFloor(endNode.floor);
-  }, [destination]);
+  }, [destination, graph.nodes]);
 
   useEffect(() => {
     if (!positioning.prediction) return;
@@ -277,27 +350,27 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   useEffect(() => {
     if (!selectedEndId) return;
 
-    const endNode = ALL_NODES.find((node) => node.id === selectedEndId);
+    const endNode = graph.nodes.find((node) => node.id === selectedEndId);
     if (!endNode) return;
 
-    const floorNodes = ALL_NODES.filter((node) => node.floor === endNode.floor);
+    const floorNodes = graph.nodes.filter((node) => node.floor === endNode.floor);
     const floorEdges: Record<string, Edge[]> = {};
 
     floorNodes.forEach((node) => {
-      floorEdges[node.id] = (EDGES[node.id] || []).filter((edge) =>
+      floorEdges[node.id] = (graph.edges[node.id] || []).filter((edge) =>
         floorNodes.some((candidate) => candidate.id === edge.target)
       );
     });
 
     // Prefer the live context prediction (always current) over the animation-synced state.
-    const livePx = {
-      x: livePointNorm.x * imageWidth,
-      y: livePointNorm.y * imageHeight,
+    const liveCanonical = {
+      x: livePointNorm.x * CANONICAL_IMAGE_WIDTH,
+      y: livePointNorm.y * CANONICAL_IMAGE_HEIGHT,
     };
 
     let autoStartId: string | null = null;
     if (endNode.floor === 4) {
-      autoStartId = nearestNodeId(floorNodes, livePx.x, livePx.y);
+      autoStartId = nearestNodeId(floorNodes, liveCanonical.x, liveCanonical.y);
     }
     if (!autoStartId) autoStartId = floorNodes[0]?.id ?? null;
     if (!autoStartId) return;
@@ -308,8 +381,6 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       .filter((node): node is GraphNode => Boolean(node));
 
     if (selectedStartId !== autoStartId) setSelectedStartId(autoStartId);
-    setCurrentFloor(endNode.floor);
-
     if (coords.length < 2) {
       setFloorPaths((prev) => ({ ...prev, [endNode.floor]: coords }));
       if (onRouteComputed) onRouteComputed(ids);
@@ -319,7 +390,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     setFloorPaths((prev) => ({ ...prev, [endNode.floor]: coords }));
     traversePath(coords, endNode.floor);
     if (onRouteComputed) onRouteComputed(ids);
-  }, [livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId, selectedStartId]);
+  }, [livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId, selectedStartId, graph.nodes, graph.edges]);
 
   const runDijkstra = (endId?: string) => {
     const end = endId ?? selectedEndId;
@@ -329,17 +400,32 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       return;
     }
 
-    const endNode = ALL_NODES.find((node) => node.id === end);
+    const endNode = graph.nodes.find((node) => node.id === end);
     if (!endNode) {
       Alert.alert("Invalid node ID");
       return;
     }
 
+    if (endNode.floor !== NAV_FLOOR) {
+      Alert.alert("Only 4th floor is enabled right now.");
+      return;
+    }
+
     setSelectedEndId(end);
-    setCurrentFloor(endNode.floor);
   };
 
-  const currentPathPoints = floorPaths[currentFloor] || [];
+  const toggleEditMode = () => {
+    setIsEditMode((prev) => {
+      const next = !prev;
+      if (next && !editingNodeId) {
+        setEditingNodeId(selectedEndId ?? nodesOnCurrentFloor[0]?.id ?? null);
+      }
+      return next;
+    });
+  };
+
+  const currentPathPoints = floorPaths[NAV_FLOOR] || [];
+  const renderedPathPoints = currentPathPoints.map(toRenderedPoint);
 
   return (
     <View style={styles.wrapper}>
@@ -355,14 +441,20 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
             {nodesOnCurrentFloor.map((node) => (
               <TouchableOpacity
                 key={node.id}
-                onPress={() => setSelectedEndId(node.id)}
+                onPress={() => {
+                  if (isEditMode) {
+                    setEditingNodeId(node.id);
+                    return;
+                  }
+                  setSelectedEndId(node.id);
+                }}
                 style={[
                   styles.nodeButton,
-                  selectedEndId === node.id && styles.nodeButtonSelected,
+                  (isEditMode ? editingNodeId === node.id : selectedEndId === node.id) && styles.nodeButtonSelected,
                 ]}>
                 <Text
                   style={
-                    selectedEndId === node.id
+                    (isEditMode ? editingNodeId === node.id : selectedEndId === node.id)
                       ? styles.nodeButtonTextSelected
                       : styles.nodeButtonText
                   }>
@@ -374,11 +466,83 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         </View>
       </View>
 
-      <View style={styles.floorButtons}>
-        <Button title="1st Floor" onPress={() => setCurrentFloor(1)} />
-        <Button title="2nd Floor" onPress={() => setCurrentFloor(2)} />
-        <Button title="3rd Floor" onPress={() => runDijkstra("3N4")} />
-        <Button title="4th Floor" onPress={() => runDijkstra("N11")} />
+      <View style={styles.editContainer}>
+        <TouchableOpacity
+          style={[styles.editToggleButton, isEditMode && styles.editToggleButtonActive]}
+          onPress={toggleEditMode}>
+          <Text style={isEditMode ? styles.editToggleTextActive : styles.editToggleText}>
+            {isEditMode ? "Node Edit: ON" : "Node Edit: OFF"}
+          </Text>
+        </TouchableOpacity>
+
+        {isEditMode ? (
+          <View style={styles.editPanel}>
+            <Text style={styles.editHint}>Tap map node or node chip to select it, then nudge it.</Text>
+            <Text style={styles.editHint}>Selected: {selectedEditNode?.id ?? "none"}</Text>
+            {selectedEditNode ? (
+              <Text style={styles.editHint}>
+                x={selectedEditNode.x.toFixed(1)} y={selectedEditNode.y.toFixed(1)}
+              </Text>
+            ) : null}
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.editNodePickerRow}>
+              {nodesOnCurrentFloor.map((node) => (
+                <TouchableOpacity
+                  key={`edit-${node.id}`}
+                  style={[styles.editNodeChip, editingNodeId === node.id && styles.editNodeChipActive]}
+                  onPress={() => setEditingNodeId(node.id)}>
+                  <Text style={editingNodeId === node.id ? styles.editNodeChipTextActive : styles.editNodeChipText}>
+                    {node.id}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={styles.editStepRow}>
+              {EDIT_STEPS.map((step) => (
+                <TouchableOpacity
+                  key={step}
+                  style={[styles.editStepChip, editStep === step && styles.editStepChipActive]}
+                  onPress={() => setEditStep(step)}>
+                  <Text style={editStep === step ? styles.editStepTextActive : styles.editStepText}>
+                    {step}px
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.nudgeGrid}>
+              <TouchableOpacity
+                style={styles.nudgeBtn}
+                disabled={!selectedEditNode}
+                onPress={() => moveEditingNode(0, -editStep)}>
+                <Text style={styles.nudgeText}>Up</Text>
+              </TouchableOpacity>
+
+              <View style={styles.nudgeRow}>
+                <TouchableOpacity
+                  style={styles.nudgeBtn}
+                  disabled={!selectedEditNode}
+                  onPress={() => moveEditingNode(-editStep, 0)}>
+                  <Text style={styles.nudgeText}>Left</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.nudgeBtn}
+                  disabled={!selectedEditNode}
+                  onPress={() => moveEditingNode(editStep, 0)}>
+                  <Text style={styles.nudgeText}>Right</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.nudgeBtn}
+                disabled={!selectedEditNode}
+                onPress={() => moveEditingNode(0, editStep)}>
+                <Text style={styles.nudgeText}>Down</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
       </View>
 
       <ImageZoom
@@ -389,14 +553,22 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         imageHeight={imageHeight}
         minScale={minScale}
         maxScale={3}
+        onClick={handleMapTap}
         enableCenterFocus={false}>
         <View>
-          <Image source={FLOOR_IMAGES[currentFloor as keyof typeof FLOOR_IMAGES]} style={{ width: imageWidth, height: imageHeight }} />
+          <ExpoImage
+            source={FLOOR_4_IMAGE}
+            style={{ width: imageWidth, height: imageHeight }}
+            contentFit="contain"
+            contentPosition="center"
+            allowDownscaling={false}
+            transition={0}
+          />
 
           <Svg width={imageWidth} height={imageHeight} style={StyleSheet.absoluteFillObject}>
-            {currentPathPoints.length > 1 && (
+            {renderedPathPoints.length > 1 && (
               <Polyline
-                points={currentPathPoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                points={renderedPathPoints.map((point) => `${point.x},${point.y}`).join(" ")}
                 fill="none"
                 stroke="red"
                 strokeWidth={4}
@@ -406,11 +578,16 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
             {nodesOnCurrentFloor.map((node) => (
               <G key={node.id}>
                 <Circle
-                  cx={node.x}
-                  cy={node.y}
+                  cx={node.x * scaleX}
+                  cy={node.y * scaleY}
                   r={5}
+                  onPress={() => {
+                    if (isEditMode) setEditingNodeId(node.id);
+                  }}
                   fill={
-                    node.id === selectedStartId
+                    node.id === editingNodeId
+                      ? "#f59e0b"
+                      : node.id === selectedStartId
                       ? "blue"
                       : node.id === selectedEndId
                         ? "red"
@@ -418,11 +595,16 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                   }
                 />
                 <SvgText
-                  x={node.x + 12}
-                  y={node.y - 8}
+                  x={node.x * scaleX + 12}
+                  y={node.y * scaleY - 8}
                   fontSize={12}
+                  onPress={() => {
+                    if (isEditMode) setEditingNodeId(node.id);
+                  }}
                   fill={
-                    node.id === selectedStartId
+                    node.id === editingNodeId
+                      ? "#b45309"
+                      : node.id === selectedStartId
                       ? "blue"
                       : node.id === selectedEndId
                         ? "red"
@@ -436,13 +618,13 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
               </G>
             ))}
 
-            {isSimulating && simulatedFloor === currentFloor && (() => {
-              const active = locationAnims.current[currentFloor];
+            {isSimulating && simulatedFloor === NAV_FLOOR && (() => {
+              const active = locationAnims.current[NAV_FLOOR];
               if (!active) return null;
               return <AnimatedCircle cx={active.x} cy={active.y} r={12} fill="dodgerblue" />;
             })()}
 
-            {currentFloor === 4 ? (
+            {NAV_FLOOR === 4 ? (
               <AnimatedCircle cx={liveAnim.x} cy={liveAnim.y} r={11} fill="#2563eb" stroke="#ffffff" strokeWidth={3} />
             ) : null}
 
@@ -455,7 +637,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 return (
                   <Polyline
                     key={`${fromId}-${index}`}
-                    points={`${from.x},${from.y} ${to.x},${to.y}`}
+                    points={`${from.x * scaleX},${from.y * scaleY} ${to.x * scaleX},${to.y * scaleY}`}
                     stroke="green"
                     strokeWidth={2}
                     strokeDasharray="4,4"
@@ -477,12 +659,6 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     paddingBottom: 12,
   },
-  floorButtons: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    marginTop: 16,
-    paddingHorizontal: 8,
-  },
   selectorContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -501,6 +677,117 @@ const styles = StyleSheet.create({
   autoStartText: {
     color: "#334155",
     fontWeight: "600",
+  },
+  editContainer: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    gap: 8,
+  },
+  editToggleButton: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#64748b",
+    backgroundColor: "#f8fafc",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  editToggleButtonActive: {
+    borderColor: "#1d4ed8",
+    backgroundColor: "#dbeafe",
+  },
+  editToggleText: {
+    color: "#334155",
+    fontWeight: "700",
+  },
+  editToggleTextActive: {
+    color: "#1e3a8a",
+    fontWeight: "700",
+  },
+  editPanel: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    padding: 10,
+    gap: 8,
+    backgroundColor: "#f8fafc",
+  },
+  editHint: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  editStepRow: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+  },
+  editNodePickerRow: {
+    flexDirection: "row",
+    gap: 8,
+    paddingVertical: 2,
+  },
+  editNodeChip: {
+    borderWidth: 1,
+    borderColor: "#94a3b8",
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: "#fff",
+  },
+  editNodeChipActive: {
+    borderColor: "#d97706",
+    backgroundColor: "#fef3c7",
+  },
+  editNodeChipText: {
+    color: "#334155",
+    fontWeight: "600",
+  },
+  editNodeChipTextActive: {
+    color: "#92400e",
+    fontWeight: "700",
+  },
+  editStepChip: {
+    borderWidth: 1,
+    borderColor: "#94a3b8",
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: "#fff",
+  },
+  editStepChipActive: {
+    borderColor: "#1d4ed8",
+    backgroundColor: "#dbeafe",
+  },
+  editStepText: {
+    color: "#334155",
+    fontWeight: "600",
+  },
+  editStepTextActive: {
+    color: "#1e3a8a",
+    fontWeight: "700",
+  },
+  nudgeGrid: {
+    alignItems: "center",
+    gap: 6,
+  },
+  nudgeRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  nudgeBtn: {
+    minWidth: 70,
+    borderWidth: 1,
+    borderColor: "#64748b",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  nudgeText: {
+    color: "#0f172a",
+    fontWeight: "700",
   },
   nodeButton: {
     paddingHorizontal: 10,
