@@ -41,6 +41,9 @@ const EDGE_TAP_THRESHOLD_PX = 18;
 const LIVE_DOT_BASE_RADIUS = 11;
 const LIVE_DOT_BASE_STROKE = 3;
 const SIM_DOT_BASE_RADIUS = 12;
+const TEMP_START_NODE_ID = "__TEMP_START__";
+const SIM_LOOP_PAUSE_MS = 500;
+const DESTINATION_REACHED_THRESHOLD_PX = 9;
 
 const ROOM_TO_NODE: Record<string, string> = {
   ENG103: "N12",
@@ -270,7 +273,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulatedFloor, setSimulatedFloor] = useState<number | null>(null);
   const [selectedStartId, setSelectedStartId] = useState<string | null>(null);
-  const [selectedEndId, setSelectedEndId] = useState<string | null>("N11");
+  const [selectedEndId, setSelectedEndId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
   const [isNavigateMode, setIsNavigateMode] = useState(false);
@@ -284,6 +287,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const locationAnims = useRef<Record<number, Animated.ValueXY>>({});
   const liveAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const animationRef = useRef<any>(null);
+  const simLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const simIsRunningRef = useRef(false);
+  const simPendingRef = useRef<{ points: { x: number; y: number }[]; floor: number } | null>(null);
+  const simLastCompletedRef = useRef<{ points: { x: number; y: number }[]; floor: number } | null>(null);
   const zoomScaleRef = useRef(1);
   const [livePointNorm, setLivePointNorm] = useState({ x: 0.5, y: 0.5 });
   const [zoomScale, setZoomScale] = useState(1);
@@ -295,6 +302,9 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const liveDotRadius = Math.max(4, Math.min(24, LIVE_DOT_BASE_RADIUS / markerScale));
   const liveDotStrokeWidth = Math.max(1, Math.min(8, LIVE_DOT_BASE_STROKE / markerScale));
   const simDotRadius = Math.max(5, Math.min(24, SIM_DOT_BASE_RADIUS / markerScale));
+  const destinationMarkerOuterRadius = Math.max(5, Math.min(22, 10 / markerScale));
+  const destinationMarkerInnerRadius = Math.max(3, Math.min(14, 5 / markerScale));
+  const destinationMarkerStrokeWidth = Math.max(1, Math.min(6, 2 / markerScale));
 
   const toRenderedPoint = (point: { x: number; y: number }) => ({
     x: point.x * scaleX,
@@ -579,6 +589,11 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     [graph.nodes]
   );
 
+  const selectedEndNodeOnCurrentFloor = useMemo(
+    () => nodesOnCurrentFloor.find((node) => node.id === selectedEndId) ?? null,
+    [nodesOnCurrentFloor, selectedEndId]
+  );
+
   const edgesOnCurrentFloor = useMemo(() => {
     const next: Record<string, Edge[]> = {};
     nodesOnCurrentFloor.forEach((node) => {
@@ -589,15 +604,31 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     return next;
   }, [nodesOnCurrentFloor, weightedEdges]);
 
-  const traversePath = (points: { x: number; y: number }[], floor: number) => {
-    if (points.length < 2) return;
-    const renderedPoints = points.map(toRenderedPoint);
-
+  const stopPathSimulation = () => {
     if (animationRef.current) {
       try {
         animationRef.current.stop();
       } catch {}
       animationRef.current = null;
+    }
+    if (simLoopTimerRef.current) {
+      clearTimeout(simLoopTimerRef.current);
+      simLoopTimerRef.current = null;
+    }
+    simIsRunningRef.current = false;
+    simPendingRef.current = null;
+    simLastCompletedRef.current = null;
+    setIsSimulating(false);
+    setSimulatedFloor(null);
+  };
+
+  const traversePath = (points: { x: number; y: number }[], floor: number) => {
+    if (points.length < 2) return;
+    const renderedPoints = points.map(toRenderedPoint);
+
+    if (simLoopTimerRef.current) {
+      clearTimeout(simLoopTimerRef.current);
+      simLoopTimerRef.current = null;
     }
 
     let anim = locationAnims.current[floor];
@@ -610,6 +641,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
     setIsSimulating(true);
     setSimulatedFloor(floor);
+    simIsRunningRef.current = true;
 
     const anims = renderedPoints.slice(1).map((point) =>
       Animated.timing(anim as any, {
@@ -622,11 +654,50 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
     animationRef.current = Animated.sequence(anims);
     animationRef.current.start(() => {
-      setIsSimulating(false);
-      setSimulatedFloor(null);
       animationRef.current = null;
+      simIsRunningRef.current = false;
+      simLastCompletedRef.current = { points, floor };
+
+      if (isNavigateMode) {
+        setIsSimulating(false);
+        setSimulatedFloor(null);
+        return;
+      }
+
+      const nextRun = simPendingRef.current ?? simLastCompletedRef.current;
+      simPendingRef.current = null;
+      if (!nextRun || nextRun.points.length < 2) {
+        setIsSimulating(false);
+        setSimulatedFloor(null);
+        return;
+      }
+
+      simLoopTimerRef.current = setTimeout(() => {
+        simLoopTimerRef.current = null;
+        if (isNavigateMode) {
+          setIsSimulating(false);
+          setSimulatedFloor(null);
+          return;
+        }
+        traversePath(nextRun.points, nextRun.floor);
+      }, SIM_LOOP_PAUSE_MS);
     });
   };
+
+  const queuePathSimulation = (points: { x: number; y: number }[], floor: number) => {
+    if (isNavigateMode || points.length < 2) return;
+    if (simIsRunningRef.current) {
+      simPendingRef.current = { points, floor };
+      return;
+    }
+    traversePath(points, floor);
+  };
+
+  useEffect(() => {
+    if (isNavigateMode) {
+      stopPathSimulation();
+    }
+  }, [isNavigateMode]);
 
   useEffect(() => {
     if (animationRef.current && simulatedFloor !== null && simulatedFloor !== NAV_FLOOR) {
@@ -634,6 +705,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         animationRef.current.stop();
       } catch {}
       animationRef.current = null;
+      if (simLoopTimerRef.current) {
+        clearTimeout(simLoopTimerRef.current);
+        simLoopTimerRef.current = null;
+      }
+      simIsRunningRef.current = false;
+      simPendingRef.current = null;
       setIsSimulating(false);
       setSimulatedFloor(null);
       const prevAnim = locationAnims.current[simulatedFloor];
@@ -644,6 +721,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       }
     }
   }, [simulatedFloor]);
+
+  useEffect(() => {
+    return () => {
+      stopPathSimulation();
+    };
+  }, []);
 
   useEffect(() => {
     if (!destination) return;
@@ -693,6 +776,26 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
   useEffect(() => {
     if (!selectedEndId) return;
+    const endNode = graph.nodes.find((node) => node.id === selectedEndId);
+    if (!endNode || endNode.floor !== NAV_FLOOR) return;
+
+    const liveCanonical = {
+      x: livePointNorm.x * CANONICAL_IMAGE_WIDTH,
+      y: livePointNorm.y * CANONICAL_IMAGE_HEIGHT,
+    };
+    const distToEnd = distance(liveCanonical, endNode);
+    if (distToEnd > DESTINATION_REACHED_THRESHOLD_PX) return;
+
+    stopPathSimulation();
+    setSelectedEndId(null);
+    setSelectedStartId(null);
+    setFloorPaths((prev) => ({ ...prev, [endNode.floor]: [] }));
+    if (onRouteComputed) onRouteComputed([]);
+    Alert.alert("Destination Reached");
+  }, [graph.nodes, livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId]);
+
+  useEffect(() => {
+    if (!selectedEndId) return;
 
     const endNode = graph.nodes.find((node) => node.id === selectedEndId);
     if (!endNode) return;
@@ -712,29 +815,116 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       y: livePointNorm.y * CANONICAL_IMAGE_HEIGHT,
     };
 
+    let routeNodes = floorNodes;
+    let routeEdges = floorEdges;
     let autoStartId: string | null = null;
-    if (endNode.floor === 4) {
-      autoStartId = nearestNodeId(floorNodes, liveCanonical.x, liveCanonical.y);
+
+    if (endNode.floor === NAV_FLOOR && floorNodes.length >= 2) {
+      const nodeById = new Map(floorNodes.map((node) => [node.id, node]));
+      const seen = new Set<string>();
+      let best:
+        | {
+            fromId: string;
+            toId: string;
+            x: number;
+            y: number;
+            dist: number;
+          }
+        | null = null;
+
+      Object.entries(floorEdges).forEach(([fromId, list]) => {
+        const from = nodeById.get(fromId);
+        if (!from) return;
+        list.forEach((edge) => {
+          const to = nodeById.get(edge.target);
+          if (!to) return;
+          const key = edgeKey(fromId, edge.target);
+          if (seen.has(key)) return;
+          seen.add(key);
+          const proj = projectToSegment(liveCanonical, from, to);
+          if (!best || proj.dist < best.dist) {
+            best = {
+              fromId,
+              toId: edge.target,
+              x: proj.x,
+              y: proj.y,
+              dist: proj.dist,
+            };
+          }
+        });
+      });
+
+      if (best) {
+        const tempStart: GraphNode = {
+          id: TEMP_START_NODE_ID,
+          x: Math.round(best.x),
+          y: Math.round(best.y),
+          floor: endNode.floor,
+        };
+
+        const from = nodeById.get(best.fromId);
+        const to = nodeById.get(best.toId);
+        if (from && to) {
+          routeNodes = [...floorNodes, tempStart];
+          routeEdges = {};
+          floorNodes.forEach((node) => {
+            routeEdges[node.id] = [...(floorEdges[node.id] || [])];
+          });
+          routeEdges[TEMP_START_NODE_ID] = [];
+
+          const toFromWeight = Math.max(1, Math.round(distance(tempStart, from)));
+          const toToWeight = Math.max(1, Math.round(distance(tempStart, to)));
+
+          routeEdges[TEMP_START_NODE_ID].push({ target: from.id, weight: toFromWeight });
+          routeEdges[TEMP_START_NODE_ID].push({ target: to.id, weight: toToWeight });
+          routeEdges[from.id] = [...(routeEdges[from.id] || []), { target: TEMP_START_NODE_ID, weight: toFromWeight }];
+          routeEdges[to.id] = [...(routeEdges[to.id] || []), { target: TEMP_START_NODE_ID, weight: toToWeight }];
+
+          autoStartId = TEMP_START_NODE_ID;
+        }
+      }
     }
-    if (!autoStartId) autoStartId = floorNodes[0]?.id ?? null;
+
+    if (!autoStartId) {
+      if (endNode.floor === NAV_FLOOR) {
+        autoStartId = nearestNodeId(floorNodes, liveCanonical.x, liveCanonical.y);
+      }
+      if (!autoStartId) autoStartId = floorNodes[0]?.id ?? null;
+    }
     if (!autoStartId) return;
 
-    const ids = dijkstra(floorNodes, floorEdges, autoStartId, selectedEndId);
+    const ids = dijkstra(routeNodes, routeEdges, autoStartId, selectedEndId);
+    const nodeByRouteId = new Map(routeNodes.map((node) => [node.id, node]));
     const coords = ids
-      .map((id) => floorNodes.find((node) => node.id === id))
+      .map((id) => nodeByRouteId.get(id))
       .filter((node): node is GraphNode => Boolean(node));
+    const reportIds = ids.filter((id) => id !== TEMP_START_NODE_ID);
 
     if (selectedStartId !== autoStartId) setSelectedStartId(autoStartId);
     if (coords.length < 2) {
+      if (!isNavigateMode) {
+        stopPathSimulation();
+      }
       setFloorPaths((prev) => ({ ...prev, [endNode.floor]: coords }));
-      if (onRouteComputed) onRouteComputed(ids);
+      if (onRouteComputed) onRouteComputed(reportIds);
       return;
     }
 
     setFloorPaths((prev) => ({ ...prev, [endNode.floor]: coords }));
-    traversePath(coords, endNode.floor);
-    if (onRouteComputed) onRouteComputed(ids);
-  }, [livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId, selectedStartId, graph.nodes, weightedEdges]);
+    if (!isNavigateMode) {
+      queuePathSimulation(coords, endNode.floor);
+    }
+    if (onRouteComputed) onRouteComputed(reportIds);
+  }, [
+    livePointNorm.x,
+    livePointNorm.y,
+    onRouteComputed,
+    selectedEndId,
+    selectedStartId,
+    graph.nodes,
+    weightedEdges,
+    isNavigateMode,
+  ]);
 
   const runDijkstra = (endId?: string) => {
     const end = endId ?? selectedEndId;
@@ -788,6 +978,18 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         <View style={styles.selectorColumn}>
           <Text style={styles.selectorLabel}>End</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <TouchableOpacity
+              key="clear-end"
+              onPress={() => {
+                setSelectedEndId(null);
+                setSelectedStartId(null);
+                stopPathSimulation();
+                setFloorPaths((prev) => ({ ...prev, [NAV_FLOOR]: [] }));
+                if (onRouteComputed) onRouteComputed([]);
+              }}
+              style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
+              <Text style={selectedEndId === null ? styles.nodeButtonTextSelected : styles.nodeButtonText}>Clear</Text>
+            </TouchableOpacity>
             {nodesOnCurrentFloor.map((node) => (
               <TouchableOpacity
                 key={node.id}
@@ -1091,6 +1293,27 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 );
               })
             )}
+
+            {selectedEndNodeOnCurrentFloor ? (
+              <G>
+                <Circle
+                  cx={selectedEndNodeOnCurrentFloor.x * scaleX}
+                  cy={selectedEndNodeOnCurrentFloor.y * scaleY}
+                  r={destinationMarkerOuterRadius}
+                  fill="none"
+                  stroke="#dc2626"
+                  strokeWidth={destinationMarkerStrokeWidth}
+                />
+                <Circle
+                  cx={selectedEndNodeOnCurrentFloor.x * scaleX}
+                  cy={selectedEndNodeOnCurrentFloor.y * scaleY}
+                  r={destinationMarkerInnerRadius}
+                  fill="rgba(220, 38, 38, 0.35)"
+                  stroke="#ffffff"
+                  strokeWidth={Math.max(1, destinationMarkerStrokeWidth * 0.8)}
+                />
+              </G>
+            ) : null}
           </Svg>
         </View>
       </ImageZoom>
