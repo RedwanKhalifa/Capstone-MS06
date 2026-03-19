@@ -8,7 +8,7 @@ import { usePositioning } from "@/context/positioning";
 const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
 const HOLD_INTERVAL_MS = 120;
 const HOLD_START_DELAY_MS = 220;
-const STEP_OPTIONS = [0.005, 0.01, 0.02] as const;
+const STEP_OPTIONS = [0.002, 0.005, 0.01, 0.02] as const;
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 

@@ -22,8 +22,8 @@ type SetupTab = 'collect' | 'live' | 'plans';
 type FingerprintSetSort = 'newest' | 'oldest' | 'name';
 
 const STALE_AFTER_MS = 6000;
-const PLAN_NUDGE_DEFAULT_STEP = 0.0025;
-const PLAN_NUDGE_STEPS = [0.001, 0.0025, 0.005] as const;
+const PLAN_NUDGE_DEFAULT_STEP = 0.002;
+const PLAN_NUDGE_STEPS = [0.001, 0.002, 0.0025, 0.005] as const;
 const HOLD_INTERVAL_MS = 120;
 const HOLD_START_DELAY_MS = 220;
 
