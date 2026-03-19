@@ -14,7 +14,7 @@ import { useBeaconRanger } from '@/hooks/use-beacon-ranger';
 import { buildKnnCache, regressKnn } from '@/lib/knn';
 import { requestBlePermissions } from '@/lib/permissions';
 import { loadDataset, loadPositioningMode, savePositioningMode, type PositioningMode } from '@/lib/storage';
-import { setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
+import { getLivePosition, setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
 import { BEACON_UUID_DEFAULT, type BeaconReading, type PlanID } from '@/types/fingerprint';
 
 const PLAN_ID: PlanID = 'ENG4_NORTH';
@@ -95,7 +95,21 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     let active = true;
     void (async () => {
       const saved = await loadPositioningMode();
-      if (active) setLiveModeState(saved);
+      if (!active) return;
+      setLiveModeState(saved);
+
+      if (saved === 'manual') {
+        const persisted = await getLivePosition();
+        if (!active) return;
+        const pos: LivePosition = {
+          x: persisted.x,
+          y: persisted.y,
+          timestamp: persisted.timestamp,
+          planId: persisted.planId ?? PLAN_ID,
+        };
+        setPrediction(pos);
+        setLiveConfidence(null);
+      }
     })();
     return () => {
       active = false;

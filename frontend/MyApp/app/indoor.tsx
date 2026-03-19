@@ -7,6 +7,7 @@ import { usePositioning } from "@/context/positioning";
 
 const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
 const HOLD_INTERVAL_MS = 120;
+const HOLD_START_DELAY_MS = 220;
 const STEP_OPTIONS = [0.005, 0.01, 0.02] as const;
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -21,6 +22,8 @@ export default function IndoorNavigationScreen() {
   const [routeNodeIds, setRouteNodeIds] = useState<string[]>([]);
   const [manualStep, setManualStep] = useState<number>(0.01);
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const holdStartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isRepeatingRef = useRef(false);
   const currentPositionRef = useRef(currentPosition);
 
   useEffect(() => {
@@ -28,6 +31,10 @@ export default function IndoorNavigationScreen() {
   }, [currentPosition]);
 
   const stopHold = () => {
+    if (holdStartRef.current) {
+      clearTimeout(holdStartRef.current);
+      holdStartRef.current = null;
+    }
     if (!holdTimerRef.current) return;
     clearInterval(holdTimerRef.current);
     holdTimerRef.current = null;
@@ -41,14 +48,28 @@ export default function IndoorNavigationScreen() {
   };
 
   const beginHold = (dx: number, dy: number) => {
-    nudgeManual(dx, dy);
     stopHold();
-    holdTimerRef.current = setInterval(() => {
+    isRepeatingRef.current = false;
+    holdStartRef.current = setTimeout(() => {
+      isRepeatingRef.current = true;
       nudgeManual(dx, dy);
-    }, HOLD_INTERVAL_MS);
+      holdTimerRef.current = setInterval(() => {
+        nudgeManual(dx, dy);
+      }, HOLD_INTERVAL_MS);
+    }, HOLD_START_DELAY_MS);
   };
 
-  useEffect(() => stopHold, []);
+  const endHold = () => {
+    stopHold();
+    isRepeatingRef.current = false;
+  };
+
+  const tapNudge = (dx: number, dy: number) => {
+    if (isRepeatingRef.current) return;
+    nudgeManual(dx, dy);
+  };
+
+  useEffect(() => endHold, []);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -69,7 +90,8 @@ export default function IndoorNavigationScreen() {
           <Pressable
             style={styles.dpadBtn}
             onPressIn={() => beginHold(0, -manualStep)}
-            onPressOut={stopHold}>
+            onPressOut={endHold}
+            onPress={() => tapNudge(0, -manualStep)}>
             <Text style={styles.dpadText}>Up</Text>
           </Pressable>
 
@@ -77,13 +99,15 @@ export default function IndoorNavigationScreen() {
             <Pressable
               style={styles.dpadBtn}
               onPressIn={() => beginHold(-manualStep, 0)}
-              onPressOut={stopHold}>
+              onPressOut={endHold}
+              onPress={() => tapNudge(-manualStep, 0)}>
               <Text style={styles.dpadText}>Left</Text>
             </Pressable>
             <Pressable
               style={styles.dpadBtn}
               onPressIn={() => beginHold(manualStep, 0)}
-              onPressOut={stopHold}>
+              onPressOut={endHold}
+              onPress={() => tapNudge(manualStep, 0)}>
               <Text style={styles.dpadText}>Right</Text>
             </Pressable>
           </View>
@@ -91,7 +115,8 @@ export default function IndoorNavigationScreen() {
           <Pressable
             style={styles.dpadBtn}
             onPressIn={() => beginHold(0, manualStep)}
-            onPressOut={stopHold}>
+            onPressOut={endHold}
+            onPress={() => tapNudge(0, manualStep)}>
             <Text style={styles.dpadText}>Down</Text>
           </Pressable>
         </View>
