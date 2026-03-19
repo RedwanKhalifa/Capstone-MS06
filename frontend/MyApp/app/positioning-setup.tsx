@@ -10,11 +10,13 @@ import {
     deleteFingerprintSet,
     loadFingerprintSets,
     loadPositioningProject,
+    loadRoutingGraph,
     overwriteFingerprintSet,
     renameFingerprintSet,
     saveFingerprintSet,
     savePositioningProject,
     type FingerprintSet,
+    type RoutingGraph,
 } from '@/lib/storage';
 import { FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
@@ -26,6 +28,10 @@ const PLAN_NUDGE_DEFAULT_STEP = 0.002;
 const PLAN_NUDGE_STEPS = [0.001, 0.002, 0.0025, 0.005] as const;
 const HOLD_INTERVAL_MS = 120;
 const HOLD_START_DELAY_MS = 220;
+const ROUTING_CANONICAL_WIDTH = 800;
+const ROUTING_CANONICAL_HEIGHT = 600;
+const ROUTING_IMPORT_FLOOR = 4;
+const ROUTING_NODE_NAME_RE = /^N\d+$/i;
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -327,6 +333,123 @@ export default function PositioningSetupScreen() {
     };
     setPoints((prev) => [...prev, next]);
     setSelectedPointId(next.id);
+  };
+
+  const importRoutingNodes = async () => {
+    const emptyGraph: RoutingGraph = { nodes: [], edges: {} };
+    const graph = await loadRoutingGraph(emptyGraph);
+    const routingNodes = graph.nodes.filter((node) => node.floor === ROUTING_IMPORT_FLOOR);
+
+    if (!routingNodes.length) {
+      Alert.alert('No nodes found', 'No routing nodes are available to import yet.');
+      return;
+    }
+
+    const existingNameSet = new Set(
+      points
+        .filter((point) => point.planID === selectedPlanID)
+        .map((point) => point.name.trim().toLowerCase())
+    );
+
+    const imported: AnchorPoint[] = [];
+    routingNodes.forEach((node) => {
+      const pointName = node.id;
+      if (existingNameSet.has(pointName.toLowerCase())) return;
+      imported.push({
+        id: createId(),
+        planID: selectedPlanID,
+        name: pointName,
+        xNorm: clamp01(node.x / ROUTING_CANONICAL_WIDTH),
+        yNorm: clamp01(node.y / ROUTING_CANONICAL_HEIGHT),
+      });
+    });
+
+    if (!imported.length) {
+      Alert.alert('Nothing to import', 'All routing nodes are already present as plan points.');
+      return;
+    }
+
+    setPoints((prev) => [...prev, ...imported]);
+    setSelectedPointId(imported[0].id);
+    Alert.alert('Imported nodes', `Imported ${imported.length} routing nodes as plan points.`);
+  };
+
+  const syncRoutingNodes = async () => {
+    const emptyGraph: RoutingGraph = { nodes: [], edges: {} };
+    const graph = await loadRoutingGraph(emptyGraph);
+    const routingNodes = graph.nodes.filter((node) => node.floor === ROUTING_IMPORT_FLOOR);
+
+    if (!routingNodes.length) {
+      Alert.alert('No nodes found', 'No routing nodes are available to sync.');
+      return;
+    }
+
+    const routingById = new Map(routingNodes.map((node) => [node.id.toLowerCase(), node]));
+    const syncedNodeNames = new Set<string>();
+    let updatedCount = 0;
+    let removedCount = 0;
+
+    const nextPoints: AnchorPoint[] = [];
+    points.forEach((point) => {
+      if (point.planID !== selectedPlanID) {
+        nextPoints.push(point);
+        return;
+      }
+
+      if (!ROUTING_NODE_NAME_RE.test(point.name.trim())) {
+        nextPoints.push(point);
+        return;
+      }
+
+      const routingNode = routingById.get(point.name.trim().toLowerCase());
+      if (!routingNode) {
+        removedCount += 1;
+        return;
+      }
+
+      syncedNodeNames.add(routingNode.id.toLowerCase());
+      const nextXNorm = clamp01(routingNode.x / ROUTING_CANONICAL_WIDTH);
+      const nextYNorm = clamp01(routingNode.y / ROUTING_CANONICAL_HEIGHT);
+      if (Math.abs(point.xNorm - nextXNorm) > 1e-6 || Math.abs(point.yNorm - nextYNorm) > 1e-6 || point.name !== routingNode.id) {
+        updatedCount += 1;
+      }
+      nextPoints.push({
+        ...point,
+        name: routingNode.id,
+        xNorm: nextXNorm,
+        yNorm: nextYNorm,
+      });
+    });
+
+    const added: AnchorPoint[] = [];
+    routingNodes.forEach((node) => {
+      const key = node.id.toLowerCase();
+      if (syncedNodeNames.has(key)) return;
+      added.push({
+        id: createId(),
+        planID: selectedPlanID,
+        name: node.id,
+        xNorm: clamp01(node.x / ROUTING_CANONICAL_WIDTH),
+        yNorm: clamp01(node.y / ROUTING_CANONICAL_HEIGHT),
+      });
+    });
+
+    if (!updatedCount && !removedCount && !added.length) {
+      Alert.alert('Already synced', 'Node-based points already match the routing graph.');
+      return;
+    }
+
+    const merged = [...nextPoints, ...added];
+    setPoints(merged);
+
+    if (selectedPointId && !merged.some((point) => point.id === selectedPointId)) {
+      setSelectedPointId(null);
+    }
+
+    Alert.alert(
+      'Synced nodes',
+      `Updated ${updatedCount}, added ${added.length}, removed ${removedCount}. Custom points were kept.`
+    );
   };
 
   const onDragPoint = (pointId: string, xNorm: number, yNorm: number) => {
@@ -669,7 +792,11 @@ export default function PositioningSetupScreen() {
         />
       </View>
 
-      <Pressable style={styles.btn} onPress={addNewPoint}><Text style={styles.btnText}>Add New Point</Text></Pressable>
+      <View style={styles.rowWrap}>
+        <Pressable style={styles.btn} onPress={addNewPoint}><Text style={styles.btnText}>Add New Point</Text></Pressable>
+        <Pressable style={styles.btnOutline} onPress={() => void importRoutingNodes()}><Text>Import Nodes</Text></Pressable>
+        <Pressable style={styles.btnOutline} onPress={() => void syncRoutingNodes()}><Text>Sync Nodes</Text></Pressable>
+      </View>
       <Text style={styles.hint}>Tap a point to select it. While selected, tap the map to move it. Deselect to pan/zoom the map.</Text>
 
       {selectedPoint ? (
