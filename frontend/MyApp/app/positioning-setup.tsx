@@ -10,7 +10,7 @@ import { loadPositioningProject, savePositioningProject } from '@/lib/storage';
 import { FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
 type SetupTab = 'collect' | 'live' | 'plans';
-type LiveMode = 'bluetooth' | 'manual';
+const STALE_AFTER_MS = 6000;
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -28,13 +28,13 @@ export default function PositioningSetupScreen() {
   const [points, setPoints] = useState<AnchorPoint[]>([]);
   const [dataset, setDataset] = useState<TrainingDataset>({ beaconKeys: [], samples: [], rows: [] });
   const [isHydrated, setIsHydrated] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [captureWindow, setCaptureWindow] = useState('3');
   const [isCapturing, setIsCapturing] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [medians, setMedians] = useState<Record<string, number>>({});
-  const [liveMode, setLiveMode] = useState<LiveMode>('bluetooth');
   const positioning = usePositioning();
 
   const buffers = useRef<Record<string, number[]>>({});
@@ -81,6 +81,11 @@ export default function PositioningSetupScreen() {
   useEffect(() => {
     latestBeaconsRef.current = positioning.beacons;
   }, [positioning.beacons]);
+
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const beginCapture = () => {
     if (!selectedPoint) {
@@ -200,7 +205,6 @@ export default function PositioningSetupScreen() {
   };
 
   const handleLiveStart = async () => {
-    setLiveMode('bluetooth');
     try {
       await positioning.startBluetooth();
     } catch (error) {
@@ -210,7 +214,6 @@ export default function PositioningSetupScreen() {
   };
 
   const setManualLivePosition = (xNorm: number, yNorm: number) => {
-    setLiveMode('manual');
     positioning.setManualPosition(xNorm, yNorm);
   };
 
@@ -224,7 +227,6 @@ export default function PositioningSetupScreen() {
 
   const handleLiveStop = () => {
     positioning.stopBluetooth();
-    setLiveMode('bluetooth');
   };
 
   const renderCollect = () => (
@@ -268,7 +270,16 @@ export default function PositioningSetupScreen() {
 
       <Text>Rows: {dataset.rows.length} • Samples: {dataset.samples.length} • Features: {dataset.beaconKeys.length}</Text>
       {Object.entries(medians).map(([k, r]) => <Text key={k}>median {k}: {r}</Text>)}
-      {positioning.beacons.map((b) => <Text key={b.key}>{b.key} ({b.uuid}) RSSI {b.rssi}</Text>)}
+      {positioning.beacons.map((b) => {
+        const ageMs = nowMs - b.lastSeen;
+        const stale = ageMs >= STALE_AFTER_MS;
+        return (
+          <Text key={b.key} style={stale ? styles.staleText : undefined}>
+            {b.key} ({b.uuid}) RSSI {b.rssi}
+            {stale ? ` [stale ${(ageMs / 1000).toFixed(1)}s]` : ''}
+          </Text>
+        );
+      })}
     </View>
   );
 
@@ -280,7 +291,7 @@ export default function PositioningSetupScreen() {
           imageSource={selectedPlan.image}
           points={planPoints}
           liveDot={positioning.prediction ? { xNorm: positioning.prediction.x, yNorm: positioning.prediction.y } : null}
-          canAddPoint={liveMode === 'manual'}
+          canAddPoint={positioning.liveMode === 'manual'}
           onAddPoint={setManualLivePosition}
         />
       </View>
@@ -288,16 +299,16 @@ export default function PositioningSetupScreen() {
       <TextInput style={styles.input} value={positioning.uuid} onChangeText={positioning.setUuid} placeholder="Beacon UUID" />
       <View style={styles.rowWrap}>
         <Pressable
-          style={[styles.chip, liveMode === 'manual' && styles.chipActive]}
+          style={[styles.chip, positioning.liveMode === 'manual' && styles.chipActive]}
           onPress={() => {
             positioning.stopBluetooth();
-            setLiveMode('manual');
+            positioning.setLiveMode('manual');
           }}>
           <Text>Manual mode</Text>
         </Pressable>
         <Pressable
-          style={[styles.chip, liveMode === 'bluetooth' && styles.chipActive]}
-          onPress={() => setLiveMode('bluetooth')}>
+          style={[styles.chip, positioning.liveMode === 'bluetooth' && styles.chipActive]}
+          onPress={() => positioning.setLiveMode('bluetooth')}>
           <Text>Bluetooth mode</Text>
         </Pressable>
         <Pressable
@@ -311,7 +322,7 @@ export default function PositioningSetupScreen() {
         </Pressable>
       </View>
 
-      {liveMode === 'manual' ? (
+      {positioning.liveMode === 'manual' ? (
         <Text style={styles.hint}>Manual mode active: tap on the map to set current position for the app.</Text>
       ) : (
         <Text style={styles.hint}>Bluetooth mode active: live regression from beacon scans.</Text>
@@ -320,11 +331,11 @@ export default function PositioningSetupScreen() {
       <Text style={styles.hint}>Perm requests Android BLE/location runtime permissions (Scan/Connect/Fine Location).</Text>
       <View style={styles.rowWrap}>
         <Pressable style={styles.btn} onPress={requestBlePermissions}><Text style={styles.btnText}>Perm</Text></Pressable>
-        <Pressable style={styles.btn} onPress={handleLiveStart} disabled={liveMode !== 'bluetooth'}><Text style={styles.btnText}>Start</Text></Pressable>
+        <Pressable style={styles.btn} onPress={handleLiveStart} disabled={positioning.liveMode !== 'bluetooth'}><Text style={styles.btnText}>Start</Text></Pressable>
         <Pressable style={styles.btnOutline} onPress={handleLiveStop}><Text>Stop</Text></Pressable>
       </View>
       <Text>
-        {liveMode === 'manual'
+        {positioning.liveMode === 'manual'
           ? 'Manual mode does not require scanning.'
           : positioning.isScanning
             ? `Scanning… Beacons found: ${positioning.beacons.length}`
@@ -444,6 +455,7 @@ const styles = StyleSheet.create({
   btnDanger: { backgroundColor: '#b91c1c', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 12 },
   hint: { color: '#475569' },
   errorText: { color: '#b91c1c', fontWeight: '600' },
+  staleText: { color: '#b45309', fontWeight: '600' },
   pointRow: {
     backgroundColor: '#fff',
     borderWidth: 1,

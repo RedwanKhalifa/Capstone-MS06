@@ -5,10 +5,17 @@ import type { AnchorPoint, TrainingDataset } from '@/types/fingerprint';
 const POINTS_FILE = `${FileSystem.documentDirectory}anchor-points.json`;
 const DATASET_FILE = `${FileSystem.documentDirectory}dataset.json`;
 const POSITIONING_PROJECT_FILE = `${FileSystem.documentDirectory}positioning-project.json`;
+const POSITIONING_MODE_FILE = `${FileSystem.documentDirectory}positioning-mode.json`;
 
 type PositioningProject = {
   points: AnchorPoint[];
   dataset: TrainingDataset;
+};
+
+export type PositioningMode = 'bluetooth' | 'manual';
+
+type PositioningModeSnapshot = {
+  mode: PositioningMode;
 };
 
 const EMPTY_DATASET: TrainingDataset = { beaconKeys: [], samples: [], rows: [] };
@@ -56,3 +63,14 @@ export const savePositioningProject = async (project: PositioningProject) => {
   // Keep legacy files in sync for backward compatibility with existing readers.
   await Promise.all([savePoints(project.points), saveDataset(project.dataset)]);
 };
+
+export const loadPositioningMode = async (): Promise<PositioningMode> => {
+  const snapshot = await readJson<PositioningModeSnapshot | null>(POSITIONING_MODE_FILE, null);
+  if (snapshot?.mode === 'manual' || snapshot?.mode === 'bluetooth') {
+    return snapshot.mode;
+  }
+  return 'bluetooth';
+};
+
+export const savePositioningMode = (mode: PositioningMode) =>
+  writeJson(POSITIONING_MODE_FILE, { mode });

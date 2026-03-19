@@ -5,7 +5,8 @@ import { BleManager, type Device } from 'react-native-ble-plx';
 import { BEACON_UUID_DEFAULT, type BeaconReading } from '@/types/fingerprint';
 
 const IBEACON_PREFIX = '4c000215';
-const OFFLINE_TIMEOUT_MS = 3000;
+// Android scan callbacks can be bursty; keep beacons visible longer before pruning.
+const OFFLINE_TIMEOUT_MS = 12000;
 const LAST_SEEN_HEARTBEAT_MS = 500;
 
 const toHex = (value: string) => Buffer.from(value, 'base64').toString('hex').toLowerCase();

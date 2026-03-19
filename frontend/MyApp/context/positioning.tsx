@@ -13,7 +13,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useBeaconRanger } from '@/hooks/use-beacon-ranger';
 import { buildKnnCache, regressKnn } from '@/lib/knn';
 import { requestBlePermissions } from '@/lib/permissions';
-import { loadDataset } from '@/lib/storage';
+import { loadDataset, loadPositioningMode, savePositioningMode, type PositioningMode } from '@/lib/storage';
 import { setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
 import { BEACON_UUID_DEFAULT, type BeaconReading, type PlanID } from '@/types/fingerprint';
 
@@ -30,6 +30,8 @@ export type PositioningContextValue = {
   setUuid: (uuid: string) => void;
   /** Latest KNN-inferred or manually-set position. null until first fix. */
   prediction: LivePosition | null;
+  liveMode: PositioningMode;
+  setLiveMode: (mode: PositioningMode) => void;
   /** True while the KNN inference loop is actively running. */
   isLiveRunning: boolean;
   liveConfidence: number | null;
@@ -55,6 +57,7 @@ const PositioningContext = createContext<PositioningContextValue | undefined>(un
 
 export function PositioningProvider({ children }: { children: React.ReactNode }) {
   const [uuid, setUuid] = useState(BEACON_UUID_DEFAULT);
+  const [liveMode, setLiveModeState] = useState<PositioningMode>('bluetooth');
   const [isLiveRunning, setIsLiveRunning] = useState(false);
   const [prediction, setPrediction] = useState<LivePosition | null>(null);
   const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
@@ -86,6 +89,22 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
   // Register plan name with the positioning adapter once on mount.
   useEffect(() => {
     void setPlanName(PLAN_ID);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const saved = await loadPositioningMode();
+      if (active) setLiveModeState(saved);
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const setLiveMode = useCallback((mode: PositioningMode) => {
+    setLiveModeState(mode);
+    void savePositioningMode(mode);
   }, []);
 
   // KNN inference loop – keeps running across navigations.
@@ -120,8 +139,9 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     setPrediction(null);
     setLiveConfidence(null);
     start();
+    setLiveMode('bluetooth');
     setIsLiveRunning(true);
-  }, [start, clear, refreshKnnCache]);
+  }, [start, clear, refreshKnnCache, setLiveMode]);
 
   const stopBluetooth = useCallback(() => {
     stop();
@@ -148,6 +168,7 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
 
   const setManualPosition = useCallback((x: number, y: number) => {
     stop();
+    setLiveMode('manual');
     setIsLiveRunning(false);
     prevRef.current = null;
     const now = Date.now();
@@ -155,7 +176,7 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     setPrediction(pos);
     setLiveConfidence(null);
     void setLivePosition(x, y, { timestamp: now, planId: PLAN_ID, accuracy: 0 });
-  }, [stop]);
+  }, [stop, setLiveMode]);
 
   const reloadDataset = useCallback(() => {
     setDatasetVersion((v) => v + 1);
@@ -168,6 +189,8 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     uuid,
     setUuid,
     prediction,
+    liveMode,
+    setLiveMode,
     isLiveRunning,
     liveConfidence,
     startBluetooth,
@@ -178,8 +201,8 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     setManualPosition,
     reloadDataset,
   }), [
-    beacons, isScanning, scanError, uuid, prediction, isLiveRunning, liveConfidence,
-    startBluetooth, stopBluetooth, startScanOnly, stopScan, clearBeacons, setManualPosition, reloadDataset,
+    beacons, isScanning, scanError, uuid, prediction, liveMode, isLiveRunning, liveConfidence,
+    setLiveMode, startBluetooth, stopBluetooth, startScanOnly, stopScan, clearBeacons, setManualPosition, reloadDataset,
   ]);
 
   return (
