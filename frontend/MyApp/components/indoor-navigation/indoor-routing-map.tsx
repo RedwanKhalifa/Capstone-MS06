@@ -31,7 +31,8 @@ type Props = {
 
 const { width: screenWidth } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-const NAV_FLOOR = 4;
+const ENG4_FLOOR = 4;
+const HOME_FLOOR = 40;
 const CANONICAL_IMAGE_WIDTH = 800;
 const CANONICAL_IMAGE_HEIGHT = 600;
 const MIN_RENDER_WIDTH = 1200;
@@ -45,15 +46,19 @@ const SIM_DOT_BASE_RADIUS = 12;
 const TEMP_START_NODE_ID = "__TEMP_START__";
 const SIM_LOOP_PAUSE_MS = 500;
 const DESTINATION_REACHED_THRESHOLD_PX = 9;
-const ROUTING_GRAPH_VERSION = 2;
+const ROUTING_GRAPH_VERSION = 3;
 
-const ROOM_TO_NODE: Record<string, string> = {
-  ENG103: "N12",
-  LIB072: "N2",
-  ENG: "N3",
+const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "HOME_MAIN", Record<string, string>> = {
+  ENG4_NORTH: {
+    ENG103: "N12",
+    LIB072: "N2",
+    ENG: "N3",
+  },
+  HOME_MAIN: {},
 };
 
 const FLOOR_4_IMAGE = require("../../assets/images/eng4_north.png");
+const HOME_IMAGE = require("../../assets/images/HomeFloorPlan-1.png");
 
 const DEFAULT_NODES: GraphNode[] = [
   { id: "3N1", x: 455, y: 180, floor: 3 },
@@ -96,6 +101,12 @@ const DEFAULT_NODES: GraphNode[] = [
   { id: "N31", x: 463, y: 297, floor: 4 },
   { id: "N32", x: 646, y: 295, floor: 4 },
   { id: "N33", x: 444, y: 369, floor: 4 },
+  { id: "H1", x: 357, y: 483, floor: 40 },
+  { id: "H2", x: 407, y: 483, floor: 40 },
+  { id: "H3", x: 409, y: 375, floor: 40 },
+  { id: "H4", x: 355, y: 375, floor: 40 },
+  { id: "H5", x: 411, y: 263, floor: 40 },
+  { id: "H6", x: 409, y: 151, floor: 40 },
 ];
 
 const DEFAULT_EDGES: Record<string, Edge[]> = {
@@ -139,6 +150,12 @@ const DEFAULT_EDGES: Record<string, Edge[]> = {
   N31: [{ target: "N30", weight: 88 }, { target: "N16", weight: 20 }],
   N32: [{ target: "N1", weight: 18 }],
   N33: [{ target: "N11", weight: 16 }, { target: "N17", weight: 25 }],
+  H1: [{ target: "H2", weight: 50 }, { target: "H4", weight: 108 }, { target: "H3", weight: 120 }],
+  H2: [{ target: "H1", weight: 50 }, { target: "H3", weight: 108 }, { target: "H4", weight: 120 }],
+  H3: [{ target: "H2", weight: 108 }, { target: "H4", weight: 54 }, { target: "H1", weight: 120 }, { target: "H5", weight: 112 }],
+  H4: [{ target: "H3", weight: 54 }, { target: "H1", weight: 108 }, { target: "H2", weight: 120 }],
+  H5: [{ target: "H3", weight: 112 }, { target: "H6", weight: 112 }],
+  H6: [{ target: "H5", weight: 112 }],
 };
 
 const DEFAULT_GRAPH: RoutingGraph = {
@@ -256,7 +273,11 @@ function withEuclideanEdgeWeights(
 
 export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const positioning = usePositioning();
-  const resolvedImage = RNImage.resolveAssetSource(FLOOR_4_IMAGE);
+  const activePlanId = (positioning as any).activePlanId === "HOME_MAIN" ? "HOME_MAIN" : "ENG4_NORTH";
+  const isRoutingPlan = true;
+  const activeFloor = activePlanId === "HOME_MAIN" ? HOME_FLOOR : ENG4_FLOOR;
+  const activeImage = activePlanId === "HOME_MAIN" ? HOME_IMAGE : FLOOR_4_IMAGE;
+  const resolvedImage = RNImage.resolveAssetSource(activeImage);
   const sourceWidth = resolvedImage.width || CANONICAL_IMAGE_WIDTH;
   const sourceHeight = resolvedImage.height || CANONICAL_IMAGE_HEIGHT;
   const pixelRatio = PixelRatio.get();
@@ -329,6 +350,15 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   });
 
   useEffect(() => {
+    if (isRoutingPlan) return;
+    stopPathSimulation();
+    setSelectedEndId(null);
+    setSelectedStartId(null);
+    setFloorPaths({});
+    if (onRouteComputed) onRouteComputed([]);
+  }, [isRoutingPlan, onRouteComputed]);
+
+  useEffect(() => {
     let active = true;
     void (async () => {
       const loaded = await loadRoutingGraph(DEFAULT_GRAPH, ROUTING_GRAPH_VERSION);
@@ -389,13 +419,40 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     edges[from] = (edges[from] || []).filter((e) => e.target !== to);
   };
 
-  const generateNextNodeId = (nodes: GraphNode[]) => {
+  const generateNextNodeId = (nodes: GraphNode[], prefix: "N" | "H" = "N") => {
     const maxN = nodes.reduce((max, n) => {
-      const match = n.id.match(/^N(\d+)$/);
+      const match = n.id.match(new RegExp(`^${prefix}(\\d+)$`));
       if (!match) return max;
       return Math.max(max, Number(match[1]));
     }, 0);
-    return `N${maxN + 1}`;
+    return `${prefix}${maxN + 1}`;
+  };
+
+  const addSeedNodeAtLivePosition = () => {
+    const prefix = activePlanId === "HOME_MAIN" ? "H" : "N";
+    const x = Math.round(Math.max(0, Math.min(CANONICAL_IMAGE_WIDTH, livePointNorm.x * CANONICAL_IMAGE_WIDTH)));
+    const y = Math.round(Math.max(0, Math.min(CANONICAL_IMAGE_HEIGHT, livePointNorm.y * CANONICAL_IMAGE_HEIGHT)));
+
+    let createdNodeId: string | null = null;
+    setGraph((prev) => {
+      const newId = generateNextNodeId(prev.nodes, prefix);
+      const newNode: GraphNode = { id: newId, x, y, floor: activeFloor };
+      createdNodeId = newId;
+      return {
+        ...prev,
+        nodes: [...prev.nodes, newNode],
+        edges: {
+          ...prev.edges,
+          [newId]: prev.edges[newId] || [],
+        },
+      };
+    });
+
+    if (createdNodeId) {
+      setEditingNodeId(createdNodeId);
+      setEdgeNodeA(createdNodeId);
+      setEdgeNodeB(null);
+    }
   };
 
   const addEdgeFromSelectedNode = () => {
@@ -427,7 +484,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           y: source.y,
         };
 
-      const newId = generateNextNodeId(prev.nodes);
+      const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : "N");
       const newNode: GraphNode = {
         id: newId,
         x: Math.round(nextPos.x),
@@ -501,7 +558,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   };
 
   const handleMapTap = (event: any) => {
-    if (!isEditMode) return;
+    if (!isRoutingPlan || !isEditMode) return;
     const tapX = typeof event?.locationX === "number" ? event.locationX : event?.x;
     const tapY = typeof event?.locationY === "number" ? event.locationY : event?.y;
     if (typeof tapX !== "number" || typeof tapY !== "number") return;
@@ -556,12 +613,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         const to = prev.nodes.find((n) => n.id === best.toId);
         if (!from || !to) return prev;
 
-        const newId = generateNextNodeId(prev.nodes);
+        const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : "N");
         const newNode: GraphNode = {
           id: newId,
           x: Math.round(best.x),
           y: Math.round(best.y),
-          floor: NAV_FLOOR,
+          floor: activeFloor,
         };
 
         const nextEdges: Record<string, Edge[]> = { ...prev.edges };
@@ -582,7 +639,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         };
       });
 
-      const newNodeId = generateNextNodeId(graph.nodes);
+      const newNodeId = generateNextNodeId(graph.nodes, activePlanId === "HOME_MAIN" ? "H" : "N");
       setEditingNodeId(newNodeId);
       setEdgeNodeA(best.fromId);
       setEdgeNodeB(newNodeId);
@@ -602,8 +659,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   };
 
   const nodesOnCurrentFloor = useMemo(
-    () => graph.nodes.filter((node) => node.floor === NAV_FLOOR),
-    [graph.nodes]
+    () => (isRoutingPlan ? graph.nodes.filter((node) => node.floor === activeFloor) : []),
+    [activeFloor, graph.nodes, isRoutingPlan]
   );
 
   const selectedEndNodeOnCurrentFloor = useMemo(
@@ -717,7 +774,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   }, [isNavigateMode]);
 
   useEffect(() => {
-    if (animationRef.current && simulatedFloor !== null && simulatedFloor !== NAV_FLOOR) {
+    if (animationRef.current && simulatedFloor !== null && simulatedFloor !== activeFloor) {
       try {
         animationRef.current.stop();
       } catch {}
@@ -737,7 +794,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         } catch {}
       }
     }
-  }, [simulatedFloor]);
+  }, [activeFloor, simulatedFloor]);
 
   useEffect(() => {
     return () => {
@@ -748,14 +805,19 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   useEffect(() => {
     if (!destination) return;
 
-    const mappedEnd = ROOM_TO_NODE[destination];
+    const normalized = destination.trim().toUpperCase();
+    const mappedByRoom = PLAN_ROOM_TO_NODE[activePlanId]?.[normalized];
+    const mappedByNodeId = graph.nodes.find(
+      (node) => node.id.toUpperCase() === normalized && node.floor === activeFloor
+    )?.id;
+    const mappedEnd = mappedByRoom ?? mappedByNodeId;
     if (!mappedEnd) return;
 
     const endNode = graph.nodes.find((node) => node.id === mappedEnd);
-    if (!endNode || endNode.floor !== NAV_FLOOR) return;
+    if (!endNode || endNode.floor !== activeFloor) return;
 
     setSelectedEndId(mappedEnd);
-  }, [destination, graph.nodes]);
+  }, [activeFloor, activePlanId, destination, graph.nodes]);
 
   useEffect(() => {
     if (!positioning.prediction) return;
@@ -792,9 +854,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   }, [cropHeight, cropWidth, imageHeight, imageWidth, isNavigateMode, livePointNorm.x, livePointNorm.y, minScale, safeMaxScale]);
 
   useEffect(() => {
+    if (!isRoutingPlan) return;
     if (!selectedEndId) return;
     const endNode = graph.nodes.find((node) => node.id === selectedEndId);
-    if (!endNode || endNode.floor !== NAV_FLOOR) return;
+    if (!endNode || endNode.floor !== activeFloor) return;
 
     const liveCanonical = {
       x: livePointNorm.x * CANONICAL_IMAGE_WIDTH,
@@ -809,9 +872,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     setFloorPaths((prev) => ({ ...prev, [endNode.floor]: [] }));
     if (onRouteComputed) onRouteComputed([]);
     Alert.alert("Destination Reached");
-  }, [graph.nodes, livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId]);
+  }, [graph.nodes, isRoutingPlan, livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId]);
 
   useEffect(() => {
+    if (!isRoutingPlan) return;
     if (!selectedEndId) return;
 
     const endNode = graph.nodes.find((node) => node.id === selectedEndId);
@@ -836,7 +900,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     let routeEdges = floorEdges;
     let autoStartId: string | null = null;
 
-    if (endNode.floor === NAV_FLOOR && floorNodes.length >= 2) {
+    if (endNode.floor === activeFloor && floorNodes.length >= 2) {
       const nodeById = new Map(floorNodes.map((node) => [node.id, node]));
       const seen = new Set<string>();
       let best:
@@ -903,7 +967,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     }
 
     if (!autoStartId) {
-      if (endNode.floor === NAV_FLOOR) {
+      if (endNode.floor === activeFloor) {
         autoStartId = nearestNodeId(floorNodes, liveCanonical.x, liveCanonical.y);
       }
       if (!autoStartId) autoStartId = floorNodes[0]?.id ?? null;
@@ -935,11 +999,13 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   }, [
     livePointNorm.x,
     livePointNorm.y,
+    isRoutingPlan,
     onRouteComputed,
     selectedEndId,
     selectedStartId,
     graph.nodes,
     weightedEdges,
+    activeFloor,
     isNavigateMode,
   ]);
 
@@ -957,8 +1023,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       return;
     }
 
-    if (endNode.floor !== NAV_FLOOR) {
-      Alert.alert("Only 4th floor is enabled right now.");
+    if (endNode.floor !== activeFloor) {
+      Alert.alert("Destination node is on a different plan/floor.");
       return;
     }
 
@@ -980,7 +1046,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     });
   };
 
-  const currentPathPoints = floorPaths[NAV_FLOOR] || [];
+  const currentPathPoints = floorPaths[activeFloor] || [];
   const renderedPathPoints = currentPathPoints.map(toRenderedPoint);
   const shouldShowNodes = isEditMode || showNodes;
 
@@ -1001,7 +1067,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 setSelectedEndId(null);
                 setSelectedStartId(null);
                 stopPathSimulation();
-                setFloorPaths((prev) => ({ ...prev, [NAV_FLOOR]: [] }));
+                setFloorPaths((prev) => ({ ...prev, [activeFloor]: [] }));
                 if (onRouteComputed) onRouteComputed([]);
               }}
               style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
@@ -1078,6 +1144,11 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
             ) : null}
 
             <View style={styles.editActionsRow}>
+              {nodesOnCurrentFloor.length === 0 ? (
+                <TouchableOpacity style={styles.editActionBtn} onPress={addSeedNodeAtLivePosition}>
+                  <Text style={styles.editActionText}>Add First Node</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={[styles.editActionBtn, isAddNodeMode && styles.editActionBtnActive]}
                 onPress={() => setIsAddNodeMode((prev) => !prev)}>
@@ -1200,7 +1271,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         enableCenterFocus={false}>
         <View>
           <ExpoImage
-            source={FLOOR_4_IMAGE}
+            source={activeImage}
             style={{ width: imageWidth, height: imageHeight }}
             contentFit="contain"
             contentPosition="center"
@@ -1209,7 +1280,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           />
 
           <Svg width={imageWidth} height={imageHeight} style={StyleSheet.absoluteFillObject}>
-            {renderedPathPoints.length > 1 && (
+            {isRoutingPlan && renderedPathPoints.length > 1 && (
               <Polyline
                 points={renderedPathPoints.map((point) => `${point.x},${point.y}`).join(" ")}
                 fill="none"
@@ -1218,7 +1289,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
               />
             )}
 
-            {shouldShowNodes
+            {isRoutingPlan && shouldShowNodes
               ? nodesOnCurrentFloor.map((node) => (
                   <G key={node.id}>
                     <Circle
@@ -1277,24 +1348,22 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 ))
               : null}
 
-            {isSimulating && simulatedFloor === NAV_FLOOR && (() => {
-              const active = locationAnims.current[NAV_FLOOR];
+            {isRoutingPlan && isSimulating && simulatedFloor === activeFloor && (() => {
+              const active = locationAnims.current[activeFloor];
               if (!active) return null;
               return <AnimatedCircle cx={active.x} cy={active.y} r={simDotRadius} fill="dodgerblue" />;
             })()}
 
-            {NAV_FLOOR === 4 ? (
-              <AnimatedCircle
-                cx={liveAnim.x}
-                cy={liveAnim.y}
-                r={liveDotRadius}
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth={liveDotStrokeWidth}
-              />
-            ) : null}
+            <AnimatedCircle
+              cx={liveAnim.x}
+              cy={liveAnim.y}
+              r={liveDotRadius}
+              fill="#2563eb"
+              stroke="#ffffff"
+              strokeWidth={liveDotStrokeWidth}
+            />
 
-            {Object.entries(edgesOnCurrentFloor).map(([fromId, edgeList]) =>
+            {isRoutingPlan && Object.entries(edgesOnCurrentFloor).map(([fromId, edgeList]) =>
               edgeList.map((edge, index) => {
                 const from = nodesOnCurrentFloor.find((node) => node.id === fromId);
                 const to = nodesOnCurrentFloor.find((node) => node.id === edge.target);
@@ -1311,7 +1380,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
               })
             )}
 
-            {selectedEndNodeOnCurrentFloor ? (
+            {isRoutingPlan && selectedEndNodeOnCurrentFloor ? (
               <G>
                 <Circle
                   cx={selectedEndNodeOnCurrentFloor.x * scaleX}

@@ -16,7 +16,7 @@ import { IconSymbol } from "../../components/ui/icon-symbol";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
 import { useAppState } from "../../context/app-state";
 
-const MAP_IMAGE = require("../../assets/images/CampusMapEng1stFloor.png");
+const MAP_IMAGE = require("../../assets/images/TMU.jpg");
 
 const BUILDING_RESULTS = TMU_BUILDINGS.map((building) => `${building.code} - ${building.name}`);
 const SEARCH_SUGGESTIONS = ["ENG", ...ENG_ROOMS];

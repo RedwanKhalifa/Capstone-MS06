@@ -30,8 +30,12 @@ const HOLD_INTERVAL_MS = 120;
 const HOLD_START_DELAY_MS = 220;
 const ROUTING_CANONICAL_WIDTH = 800;
 const ROUTING_CANONICAL_HEIGHT = 600;
-const ROUTING_IMPORT_FLOOR = 4;
-const ROUTING_NODE_NAME_RE = /^N\d+$/i;
+const PLAN_ROUTING_FLOOR: Record<PlanID, number> = {
+  ENG4_NORTH: 4,
+  HOME_MAIN: 40,
+};
+
+const planRoutingNodeNameRe = (planID: PlanID) => (planID === 'HOME_MAIN' ? /^H\d+$/i : /^N\d+$/i);
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
@@ -42,11 +46,19 @@ const median = (values: number[]) => {
   return sorted.length % 2 === 0 ? Math.round((sorted[m - 1] + sorted[m]) / 2) : sorted[m];
 };
 
+const snapshotHasPlanData = (set: FingerprintSet, planID: PlanID) => {
+  const hasPlanPoints = set.snapshot.points.some((p) => p.planID === planID);
+  const hasPlanRows = set.snapshot.dataset.rows.some((r) => r.planID === planID);
+  const hasPlanSamples = set.snapshot.dataset.samples.some((s) => s.planID === planID);
+  return hasPlanPoints || hasPlanRows || hasPlanSamples;
+};
+
 export default function PositioningSetupScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<SetupTab>('collect');
 
-  const selectedPlanID: PlanID = 'ENG4_NORTH';
+  const [selectedPlanID, setSelectedPlanID] = useState<PlanID>('ENG4_NORTH');
+  const [planMenuOpen, setPlanMenuOpen] = useState(false);
   const [points, setPoints] = useState<AnchorPoint[]>([]);
   const [dataset, setDataset] = useState<TrainingDataset>({ beaconKeys: [], samples: [], rows: [] });
   const [isHydrated, setIsHydrated] = useState(false);
@@ -114,7 +126,7 @@ export default function PositioningSetupScreen() {
   const capturedPointCount = new Set(planTrainableRows.map((r) => r.pointID)).size;
 
   const visibleFingerprintSets = useMemo(() => {
-    const list = [...savedFingerprintSets];
+    const list = savedFingerprintSets.filter((set) => snapshotHasPlanData(set, selectedPlanID));
     if (fingerprintSetSort === 'name') {
       return list.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -122,7 +134,16 @@ export default function PositioningSetupScreen() {
       return list.sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
     }
     return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [savedFingerprintSets, fingerprintSetSort]);
+  }, [savedFingerprintSets, fingerprintSetSort, selectedPlanID]);
+
+  const makePlanScopedSnapshot = useMemo(() => {
+    return {
+      points: points.filter((p) => p.planID === selectedPlanID),
+      dataset: buildDataset(dataset.rows.filter((r) => r.planID === selectedPlanID)),
+    };
+  }, [dataset.rows, points, selectedPlanID]);
+
+  const planScopedDataset = makePlanScopedSnapshot.dataset;
 
   useEffect(() => {
     latestBeaconsRef.current = positioning.beacons;
@@ -132,6 +153,14 @@ export default function PositioningSetupScreen() {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!activeFingerprintSetId) return;
+    const activeSet = savedFingerprintSets.find((set) => set.id === activeFingerprintSetId);
+    if (!activeSet || !snapshotHasPlanData(activeSet, selectedPlanID)) {
+      setActiveFingerprintSetId(null);
+    }
+  }, [activeFingerprintSetId, savedFingerprintSets, selectedPlanID]);
 
   const beginCapture = () => {
     if (!selectedPoint) {
@@ -231,14 +260,14 @@ export default function PositioningSetupScreen() {
   };
 
   const saveFingerprints = async () => {
-    const autoName = `ENG4 ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+    const autoName = `${selectedPlan.title} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
     const name = fingerprintSetName.trim() || autoName;
-    const saved = await saveFingerprintSet(name, { points, dataset });
+    const saved = await saveFingerprintSet(name, makePlanScopedSnapshot);
     setActiveFingerprintSetId(saved.id);
     setFingerprintSetName(saved.name);
     await loadSavedFingerprintSets();
     setShowSavedFingerprintSets(true);
-    Alert.alert('Saved', `Fingerprint set "${saved.name}" saved in app storage.`);
+    Alert.alert('Saved', `Fingerprint set "${saved.name}" saved for ${selectedPlan.title}.`);
   };
 
   const overwriteActiveFingerprints = async () => {
@@ -246,11 +275,17 @@ export default function PositioningSetupScreen() {
       Alert.alert('No active dataset', 'Open a fingerprint set first, then use Overwrite Save.');
       return;
     }
+    const activeSet = savedFingerprintSets.find((set) => set.id === activeFingerprintSetId);
+    if (!activeSet || !snapshotHasPlanData(activeSet, selectedPlanID)) {
+      setActiveFingerprintSetId(null);
+      Alert.alert('No active dataset', `Open a ${selectedPlan.title} fingerprint set first, then use Overwrite Save.`);
+      return;
+    }
     const preferredName = fingerprintSetName.trim();
     try {
       const updated = await overwriteFingerprintSet(
         activeFingerprintSetId,
-        { points, dataset },
+        makePlanScopedSnapshot,
         preferredName || undefined
       );
       setFingerprintSetName(updated.name);
@@ -264,8 +299,22 @@ export default function PositioningSetupScreen() {
   };
 
   const openFingerprints = async (set: FingerprintSet) => {
-    setPoints(set.snapshot.points);
-    setDataset(set.snapshot.dataset);
+    const scopedRows = set.snapshot.dataset.rows.filter((row) => row.planID === selectedPlanID);
+    const scopedPoints = set.snapshot.points.filter((point) => point.planID === selectedPlanID);
+
+    if (!scopedRows.length && !scopedPoints.length) {
+      Alert.alert('Wrong plan', `"${set.name}" has no data for ${selectedPlan.title}.`);
+      return;
+    }
+
+    setPoints((prev) => {
+      const kept = prev.filter((point) => point.planID !== selectedPlanID);
+      return [...kept, ...scopedPoints];
+    });
+    setDataset((prev) => {
+      const keptRows = prev.rows.filter((row) => row.planID !== selectedPlanID);
+      return buildDataset([...keptRows, ...scopedRows]);
+    });
     setSelectedPointId(null);
     setActiveFingerprintSetId(set.id);
     setFingerprintSetName(set.name);
@@ -274,7 +323,7 @@ export default function PositioningSetupScreen() {
     setRenamingSetName('');
     Alert.alert(
       'Opened',
-      `Loaded "${set.name}" with ${set.snapshot.points.length} points and ${set.snapshot.dataset.rows.length} rows.`
+      `Loaded "${set.name}" for ${selectedPlan.title} with ${scopedPoints.length} points and ${scopedRows.length} rows.`
     );
   };
 
@@ -338,10 +387,11 @@ export default function PositioningSetupScreen() {
   const importRoutingNodes = async () => {
     const emptyGraph: RoutingGraph = { nodes: [], edges: {} };
     const graph = await loadRoutingGraph(emptyGraph);
-    const routingNodes = graph.nodes.filter((node) => node.floor === ROUTING_IMPORT_FLOOR);
+    const routingFloor = PLAN_ROUTING_FLOOR[selectedPlanID];
+    const routingNodes = graph.nodes.filter((node) => node.floor === routingFloor);
 
     if (!routingNodes.length) {
-      Alert.alert('No nodes found', 'No routing nodes are available to import yet.');
+      Alert.alert('No nodes found', `No routing nodes are available to import for ${selectedPlan.title}.`);
       return;
     }
 
@@ -377,10 +427,12 @@ export default function PositioningSetupScreen() {
   const syncRoutingNodes = async () => {
     const emptyGraph: RoutingGraph = { nodes: [], edges: {} };
     const graph = await loadRoutingGraph(emptyGraph);
-    const routingNodes = graph.nodes.filter((node) => node.floor === ROUTING_IMPORT_FLOOR);
+    const routingFloor = PLAN_ROUTING_FLOOR[selectedPlanID];
+    const nodeNameRe = planRoutingNodeNameRe(selectedPlanID);
+    const routingNodes = graph.nodes.filter((node) => node.floor === routingFloor);
 
     if (!routingNodes.length) {
-      Alert.alert('No nodes found', 'No routing nodes are available to sync.');
+      Alert.alert('No nodes found', `No routing nodes are available to sync for ${selectedPlan.title}.`);
       return;
     }
 
@@ -396,7 +448,7 @@ export default function PositioningSetupScreen() {
         return;
       }
 
-      if (!ROUTING_NODE_NAME_RE.test(point.name.trim())) {
+      if (!nodeNameRe.test(point.name.trim())) {
         nextPoints.push(point);
         return;
       }
@@ -506,9 +558,16 @@ export default function PositioningSetupScreen() {
 
   useEffect(() => endNudgeHold, []);
 
+  const onSelectPlan = (planID: PlanID) => {
+    setSelectedPlanID(planID);
+    positioning.setActivePlan(planID);
+    setSelectedPointId(null);
+    setPlanMenuOpen(false);
+  };
+
   const handleLiveStart = async () => {
     try {
-      await positioning.startBluetooth();
+      await positioning.startBluetooth(selectedPlanID);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Bluetooth and Location permissions are required to scan beacons.';
       Alert.alert('Unable to start live Bluetooth mode', message);
@@ -516,7 +575,7 @@ export default function PositioningSetupScreen() {
   };
 
   const setManualLivePosition = (xNorm: number, yNorm: number) => {
-    positioning.setManualPosition(xNorm, yNorm);
+    positioning.setManualPosition(xNorm, yNorm, selectedPlanID);
   };
 
   const handleCollectStart = async () => {
@@ -617,6 +676,8 @@ export default function PositioningSetupScreen() {
           </View>
           {savedFingerprintSets.length === 0 ? (
             <Text style={styles.hint}>No saved fingerprint sets yet.</Text>
+          ) : visibleFingerprintSets.length === 0 ? (
+            <Text style={styles.hint}>No saved fingerprint sets for {selectedPlan.title} yet.</Text>
           ) : (
             visibleFingerprintSets.map((set) => (
               <View key={set.id} style={styles.savedSetRow}>
@@ -686,7 +747,13 @@ export default function PositioningSetupScreen() {
         </View>
       ) : null}
 
-      <Text>Rows: {dataset.rows.length} • Samples: {dataset.samples.length} • Features: {dataset.beaconKeys.length}</Text>
+      <Text>
+        Rows ({selectedPlan.title}): {planScopedDataset.rows.length}
+        {' • '}
+        Samples ({selectedPlan.title}): {planScopedDataset.samples.length}
+        {' • '}
+        Features ({selectedPlan.title}): {planScopedDataset.beaconKeys.length}
+      </Text>
       {Object.entries(medians).map(([k, r]) => <Text key={k}>median {k}: {r}</Text>)}
       {positioning.beacons.map((b) => {
         const ageMs = nowMs - b.lastSeen;
@@ -703,12 +770,16 @@ export default function PositioningSetupScreen() {
 
   const renderLive = () => (
     <View style={styles.sectionCard}>
-      <Text style={styles.sectionTitle}>Live Position (ENG4 North)</Text>
+      <Text style={styles.sectionTitle}>Live Position ({selectedPlan.title})</Text>
       <View style={styles.mapContainer}>
         <FloorplanCanvas
           imageSource={selectedPlan.image}
           points={planPoints}
-          liveDot={positioning.prediction ? { xNorm: positioning.prediction.x, yNorm: positioning.prediction.y } : null}
+          liveDot={
+            positioning.prediction && positioning.prediction.planId === selectedPlanID
+              ? { xNorm: positioning.prediction.x, yNorm: positioning.prediction.y }
+              : null
+          }
           canAddPoint={positioning.liveMode === 'manual'}
           onAddPoint={setManualLivePosition}
         />
@@ -772,7 +843,7 @@ export default function PositioningSetupScreen() {
 
   const renderPlans = () => (
     <View style={styles.sectionCard}>
-      <Text style={styles.sectionTitle}>Plan Points (ENG4 North)</Text>
+      <Text style={styles.sectionTitle}>Plan Points ({selectedPlan.title})</Text>
       {selectedPoint ? (
         <View style={styles.topMapActions}>
           <Pressable style={styles.btnOutline} onPress={() => setSelectedPointId(null)}>
@@ -872,7 +943,33 @@ export default function PositioningSetupScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Pressable onPress={() => router.back()}><Text style={styles.back}>Back</Text></Pressable>
       <Text style={styles.title}>Positioning Setup</Text>
-      <Text style={styles.sub}>Full setup for ENG4 North: place points, collect fingerprints, and run live position view.</Text>
+      <Text style={styles.sub}>Place points, collect fingerprints, and run live position view for the selected plan.</Text>
+
+      <View style={styles.planSelectorWrap}>
+        <Text style={styles.planSelectorLabel}>Active plan</Text>
+        <Pressable style={styles.planSelectorButton} onPress={() => setPlanMenuOpen((prev) => !prev)}>
+          <Text style={styles.planSelectorButtonText}>{selectedPlan.title}</Text>
+          <Text style={styles.planSelectorChevron}>{planMenuOpen ? '▲' : '▼'}</Text>
+        </Pressable>
+        {planMenuOpen ? (
+          <View style={styles.planMenu}>
+            {FLOOR_PLANS.map((plan) => (
+              <Pressable
+                key={plan.id}
+                style={[
+                  styles.planMenuItem,
+                  selectedPlanID === plan.id && styles.planMenuItemActive,
+                  FLOOR_PLANS[FLOOR_PLANS.length - 1]?.id === plan.id && styles.planMenuItemLast,
+                ]}
+                onPress={() => onSelectPlan(plan.id)}>
+                <Text style={selectedPlanID === plan.id ? styles.planMenuItemTextActive : styles.planMenuItemText}>
+                  {plan.title}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.tabRow}>
         {(['collect', 'live', 'plans'] as SetupTab[]).map((item) => (
@@ -895,6 +992,38 @@ const styles = StyleSheet.create({
   back: { color: '#2b3ea0', fontWeight: '700' },
   title: { fontSize: 24, fontWeight: '700' },
   sub: { color: '#334155' },
+  planSelectorWrap: { gap: 6 },
+  planSelectorLabel: { color: '#334155', fontWeight: '600' },
+  planSelectorButton: {
+    borderWidth: 1,
+    borderColor: '#94a3b8',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  planSelectorButtonText: { color: '#0f172a', fontWeight: '700' },
+  planSelectorChevron: { color: '#334155', fontSize: 12, fontWeight: '700' },
+  planMenu: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  planMenuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  planMenuItemLast: { borderBottomWidth: 0 },
+  planMenuItemActive: { backgroundColor: '#dbeafe' },
+  planMenuItemText: { color: '#0f172a', fontWeight: '600' },
+  planMenuItemTextActive: { color: '#1d4ed8', fontWeight: '700' },
 
   tabRow: { flexDirection: 'row', gap: 8 },
   tab: { backgroundColor: '#d4d0df', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12 },

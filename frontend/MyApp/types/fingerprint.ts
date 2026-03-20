@@ -1,6 +1,6 @@
 import { ImageSourcePropType } from 'react-native';
 
-export type PlanID = 'ENG4_NORTH';
+export type PlanID = 'ENG4_NORTH' | 'HOME_MAIN';
 
 export type FloorPlanDefinition = {
   id: PlanID;
@@ -60,6 +60,7 @@ export const BEACON_UUID_DEFAULT = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 
 export const FLOOR_PLANS: FloorPlanDefinition[] = [
   { id: 'ENG4_NORTH', title: 'ENG4 North', image: require('@/assets/images/eng4_north.png') },
+  { id: 'HOME_MAIN', title: 'Home Floor Plan', image: require('@/assets/images/HomeFloorPlan-1.png') },
 ];
 
 export const RSSI_FLOOR = -100;
