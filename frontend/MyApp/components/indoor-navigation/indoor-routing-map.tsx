@@ -31,8 +31,13 @@ type Props = {
 
 const { width: screenWidth } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-const ENG4_FLOOR = 4;
-const HOME_FLOOR = 40;
+const PLAN_FLOORS: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", number> = {
+  ENG4_NORTH: 4,
+  ENG4_SOUTH: 5,
+  ENG3_NORTH: 3,
+  ENG3_SOUTH: 2,
+  HOME_MAIN: 40,
+};
 const CANONICAL_IMAGE_WIDTH = 800;
 const CANONICAL_IMAGE_HEIGHT = 600;
 const MIN_RENDER_WIDTH = 1200;
@@ -48,17 +53,25 @@ const SIM_LOOP_PAUSE_MS = 500;
 const DESTINATION_REACHED_THRESHOLD_PX = 9;
 const ROUTING_GRAPH_VERSION = 3;
 
-const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "HOME_MAIN", Record<string, string>> = {
+const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", Record<string, string>> = {
   ENG4_NORTH: {
     ENG103: "N12",
     LIB072: "N2",
     ENG: "N3",
   },
+  ENG4_SOUTH: {},
+  ENG3_NORTH: {},
+  ENG3_SOUTH: {},
   HOME_MAIN: {},
 };
 
-const FLOOR_4_IMAGE = require("../../assets/images/eng4_north.png");
-const HOME_IMAGE = require("../../assets/images/HomeFloorPlan-1.png");
+const PLAN_IMAGES: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", any> = {
+  ENG4_NORTH: require("../../assets/images/eng4_north.png"),
+  ENG4_SOUTH: require("../../assets/images/eng4_south.png"),
+  ENG3_NORTH: require("../../assets/images/eng3_north.png"),
+  ENG3_SOUTH: require("../../assets/images/eng3_south.png"),
+  HOME_MAIN: require("../../assets/images/HomeFloorPlan-1.png"),
+};
 
 const DEFAULT_NODES: GraphNode[] = [
   { id: "3N1", x: 455, y: 180, floor: 3 },
@@ -273,10 +286,10 @@ function withEuclideanEdgeWeights(
 
 export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const positioning = usePositioning();
-  const activePlanId = (positioning as any).activePlanId === "HOME_MAIN" ? "HOME_MAIN" : "ENG4_NORTH";
+  const activePlanId = (positioning as any).activePlanId as "ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN" ?? "ENG4_NORTH";
   const isRoutingPlan = true;
-  const activeFloor = activePlanId === "HOME_MAIN" ? HOME_FLOOR : ENG4_FLOOR;
-  const activeImage = activePlanId === "HOME_MAIN" ? HOME_IMAGE : FLOOR_4_IMAGE;
+  const activeFloor = PLAN_FLOORS[activePlanId];
+  const activeImage = PLAN_IMAGES[activePlanId];
   const resolvedImage = RNImage.resolveAssetSource(activeImage);
   const sourceWidth = resolvedImage.width || CANONICAL_IMAGE_WIDTH;
   const sourceHeight = resolvedImage.height || CANONICAL_IMAGE_HEIGHT;
@@ -419,7 +432,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     edges[from] = (edges[from] || []).filter((e) => e.target !== to);
   };
 
-  const generateNextNodeId = (nodes: GraphNode[], prefix: "N" | "H" = "N") => {
+  const generateNextNodeId = (nodes: GraphNode[], prefix: "N" | "H" | "3N" = "N") => {
     const maxN = nodes.reduce((max, n) => {
       const match = n.id.match(new RegExp(`^${prefix}(\\d+)$`));
       if (!match) return max;
@@ -429,7 +442,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   };
 
   const addSeedNodeAtLivePosition = () => {
-    const prefix = activePlanId === "HOME_MAIN" ? "H" : "N";
+    const prefix = activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N";
     const x = Math.round(Math.max(0, Math.min(CANONICAL_IMAGE_WIDTH, livePointNorm.x * CANONICAL_IMAGE_WIDTH)));
     const y = Math.round(Math.max(0, Math.min(CANONICAL_IMAGE_HEIGHT, livePointNorm.y * CANONICAL_IMAGE_HEIGHT)));
 
@@ -484,7 +497,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           y: source.y,
         };
 
-      const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : "N");
+      const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
       const newNode: GraphNode = {
         id: newId,
         x: Math.round(nextPos.x),
@@ -613,7 +626,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         const to = prev.nodes.find((n) => n.id === best.toId);
         if (!from || !to) return prev;
 
-        const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : "N");
+        const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
         const newNode: GraphNode = {
           id: newId,
           x: Math.round(best.x),
@@ -639,7 +652,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         };
       });
 
-      const newNodeId = generateNextNodeId(graph.nodes, activePlanId === "HOME_MAIN" ? "H" : "N");
+      const newNodeId = generateNextNodeId(graph.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
       setEditingNodeId(newNodeId);
       setEdgeNodeA(best.fromId);
       setEdgeNodeB(newNodeId);

@@ -32,10 +32,17 @@ const ROUTING_CANONICAL_WIDTH = 800;
 const ROUTING_CANONICAL_HEIGHT = 600;
 const PLAN_ROUTING_FLOOR: Record<PlanID, number> = {
   ENG4_NORTH: 4,
+  ENG4_SOUTH: 5,
+  ENG3_NORTH: 3,
+  ENG3_SOUTH: 2,
   HOME_MAIN: 40,
 };
 
-const planRoutingNodeNameRe = (planID: PlanID) => (planID === 'HOME_MAIN' ? /^H\d+$/i : /^N\d+$/i);
+const planRoutingNodeNameRe = (planID: PlanID) => {
+  if (planID === 'HOME_MAIN') return /^H\d+$/i;
+  if (planID === 'ENG3_NORTH' || planID === 'ENG3_SOUTH') return /^3N\d+$/i;
+  return /^N\d+$/i;
+};
 
 const createId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
