@@ -16,7 +16,7 @@ export type NormalizedBeacon = {
  */
 export function useLivePosition(readings: NormalizedBeacon[]) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  const rssiAveragesRef = useRef<Record<BeaconId, number>>({});
+  const rssiAveragesRef = useRef<Partial<Record<BeaconId, number>>>({});
   const motion = useMotionIntensity();
 
   useEffect(() => {

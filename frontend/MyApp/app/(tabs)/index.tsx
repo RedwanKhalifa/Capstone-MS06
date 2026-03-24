@@ -23,7 +23,7 @@ const SEARCH_SUGGESTIONS = ["ENG", ...ENG_ROOMS];
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { saved, accessibility, setAllAccessibility } = useAppState();
+  const { saved, setAllAccessibility } = useAppState();
   const [searchQuery, setSearchQuery] = useState("");
   const [recents, setRecents] = useState<string[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);

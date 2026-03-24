@@ -1,16 +1,52 @@
 import { Buffer } from 'buffer';
+import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BleManager, type Device } from 'react-native-ble-plx';
 
 import { BEACON_UUID_DEFAULT, type BeaconReading } from '@/types/fingerprint';
+
+type Device = {
+  manufacturerData: string | null;
+  rssi: number | null;
+};
+
+type BleManagerType = {
+  startDeviceScan: (
+    uuids: string[] | null,
+    options: Record<string, unknown> | null,
+    callback: (error: { message?: string } | null, device: Device | null) => void
+  ) => void;
+  stopDeviceScan: () => void;
+};
+
+type BleManagerCtor = new () => BleManagerType;
 
 const IBEACON_PREFIX = '4c000215';
 // Android scan callbacks can be bursty; keep beacons visible longer before pruning.
 const OFFLINE_TIMEOUT_MS = 12000;
 const LAST_SEEN_HEARTBEAT_MS = 500;
 
+let BleManagerClass: BleManagerCtor | null = null;
+
 const toHex = (value: string) => Buffer.from(value, 'base64').toString('hex').toLowerCase();
 const normalizeUuid = (value: string) => value.trim().toLowerCase();
+
+function loadBleManagerClass(): BleManagerCtor | null {
+  // Expo Go does not include custom native BLE modules like react-native-ble-plx.
+  if (Constants.appOwnership === 'expo') {
+    return null;
+  }
+
+  if (!BleManagerClass) {
+    try {
+      const blePlx = require('react-native-ble-plx') as { BleManager: BleManagerCtor };
+      BleManagerClass = blePlx.BleManager;
+    } catch {
+      BleManagerClass = null;
+    }
+  }
+
+  return BleManagerClass;
+}
 
 const parseIBeacon = (device: Device) => {
   if (!device.manufacturerData || device.rssi == null) return null;
@@ -30,14 +66,26 @@ const parseIBeacon = (device: Device) => {
 };
 
 export const useBeaconRanger = (uuidFilter: string) => {
-  const manager = useMemo(() => new BleManager(), []);
+  const manager = useMemo(() => {
+    const BleManager = loadBleManagerClass();
+    if (!BleManager) return null;
+
+    try {
+      return new BleManager();
+    } catch {
+      return null;
+    }
+  }, []);
+
   const [beacons, setBeacons] = useState<Record<string, BeaconReading>>({});
   const [isScanning, setIsScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(
+    manager ? null : 'BLE scanning is unavailable in Expo Go. Use a development build for live beacon ranging.'
+  );
 
   useEffect(() => {
     return () => {
-      manager.stopDeviceScan();
+      manager?.stopDeviceScan();
     };
   }, [manager]);
 
@@ -90,6 +138,12 @@ export const useBeaconRanger = (uuidFilter: string) => {
   );
 
   const start = useCallback(async () => {
+    if (!manager) {
+      setScanError('BLE scanning is unavailable in Expo Go. Use a development build for live beacon ranging.');
+      setIsScanning(false);
+      return;
+    }
+
     setScanError(null);
     setIsScanning(true);
     manager.startDeviceScan(null, { allowDuplicates: true }, (error, d) => {
@@ -103,7 +157,7 @@ export const useBeaconRanger = (uuidFilter: string) => {
   }, [manager, upsert]);
 
   const stop = useCallback(() => {
-    manager.stopDeviceScan();
+    manager?.stopDeviceScan();
     setIsScanning(false);
   }, [manager]);
 
