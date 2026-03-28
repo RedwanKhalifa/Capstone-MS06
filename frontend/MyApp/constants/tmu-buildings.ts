@@ -148,7 +148,7 @@ export const TMU_BUILDINGS: BuildingEntry[] = [
     image: "https://images.unsplash.com/photo-1523413651479-597eb2da0ad6?auto=format&fit=crop&w=800&q=80",
   },
   {
-    name: "Engineering Building",
+    name: "George Vari Engineering and Computing Centre",
     code: "ENG",
     description:
       "ENG is on the east side of Church St. and spans almost the full length of the block from Gould St. to just north of Dundas St. The building provides facilities for Computer Science, Mathematics, Aerospace Engineering, Civil Engineering and Electrical, Computer and Biomedical Engineering. It also has the administrative offices for the Faculty of Engineering and Architectural Science.",
