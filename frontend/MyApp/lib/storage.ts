@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
 
 import type { AnchorPoint, TrainingDataset } from '@/types/fingerprint';
 
@@ -54,8 +55,15 @@ type PositioningModeSnapshot = {
 
 const EMPTY_DATASET: TrainingDataset = { beaconKeys: [], samples: [], rows: [] };
 
+const webStorageKey = (uri: string) => `capstone-ms06:${uri}`;
+
 async function readJson<T>(uri: string, fallback: T): Promise<T> {
   try {
+    if (Platform.OS === 'web') {
+      const text = globalThis.localStorage?.getItem(webStorageKey(uri));
+      return text == null ? fallback : (JSON.parse(text) as T);
+    }
+
     const info = await FileSystem.getInfoAsync(uri);
     if (!info.exists) return fallback;
     const text = await FileSystem.readAsStringAsync(uri);
@@ -66,6 +74,11 @@ async function readJson<T>(uri: string, fallback: T): Promise<T> {
 }
 
 async function writeJson(uri: string, value: unknown) {
+  if (Platform.OS === 'web') {
+    globalThis.localStorage?.setItem(webStorageKey(uri), JSON.stringify(value));
+    return;
+  }
+
   await FileSystem.writeAsStringAsync(uri, JSON.stringify(value));
 }
 
