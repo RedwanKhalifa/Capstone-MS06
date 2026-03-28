@@ -15,8 +15,8 @@ import {
 import MapView, { Marker, Polygon } from "react-native-maps";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
-import { TMU_CAMPUS_OVERLAYS } from "../../constants/tmu-campus-overlays";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
+import { TMU_CAMPUS_OVERLAYS } from "../../constants/tmu-campus-overlays";
 import { useAppState } from "../../context/app-state";
 
 const BUILDING_RESULTS = TMU_BUILDINGS.map((building) => `${building.code} - ${building.name}`);
