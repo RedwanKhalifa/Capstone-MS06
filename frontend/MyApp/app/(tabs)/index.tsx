@@ -1,8 +1,10 @@
 import { useRouter } from "expo-router";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Image,
+  Keyboard,
   Linking,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,7 +12,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
+import MapView, { Marker, Polygon } from "react-native-maps";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import { TMU_CAMPUS_OVERLAYS } from "../../constants/tmu-campus-overlays";
@@ -18,7 +20,9 @@ import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tm
 import { useAppState } from "../../context/app-state";
 
 const BUILDING_RESULTS = TMU_BUILDINGS.map((building) => `${building.code} - ${building.name}`);
-const SEARCH_SUGGESTIONS = ["ENG", ...ENG_ROOMS];
+const SEARCH_SUGGESTIONS = [...ENG_ROOMS];
+const FALLBACK_BUILDING_IMAGE =
+  "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=800&q=80";
 const TMU_REGION = {
   latitude: 43.6577,
   longitude: -79.3788,
@@ -36,31 +40,104 @@ const TMU_CAMERA = {
   altitude: 1200,
 };
 
+type SearchResultItem = {
+  key: string;
+  value: string;
+  title: string;
+  subtitle?: string;
+  rank: number;
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { saved, setAllAccessibility } = useAppState();
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchActive, setSearchActive] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<BuildingEntry | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  const [labelTracksViewChanges, setLabelTracksViewChanges] = useState(true);
+  const engBuilding = TMU_BUILDINGS.find((entry) => entry.code === "ENG") ?? null;
+  const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) <= 29;
+  const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
 
-  const filteredResults = useMemo(() => {
+  useEffect(() => {
+    if (!showCampusOverlays) {
+      return;
+    }
+
+    setLabelTracksViewChanges(true);
+    const timer = setTimeout(() => setLabelTracksViewChanges(false), 1200);
+    return () => clearTimeout(timer);
+  }, [showCampusOverlays]);
+
+  const filteredResults = useMemo<SearchResultItem[]>(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
-      return recents;
+      return recents.map((item, index) => {
+        const title = item.includes(" - ") ? item.split(" - ")[0] : item;
+        const subtitle = item.includes(" - ")
+          ? item.split(" - ")[1]
+          : item.startsWith("ENG ")
+            ? engBuilding?.name
+            : undefined;
+
+        return {
+          key: `${item}-${index}`,
+          value: item,
+          title,
+          subtitle,
+          rank: index,
+        };
+      });
     }
-    const matches = SEARCH_SUGGESTIONS.filter((item) =>
+    const buildingMatches = TMU_BUILDINGS.filter((building) => {
+      const candidate = `${building.code} ${building.name}`.toLowerCase();
+      return candidate.includes(query);
+    }).map((building) => {
+      const code = building.code.toLowerCase();
+      const name = building.name.toLowerCase();
+      let rank = 4;
+      if (code === query) {
+        rank = 0;
+      } else if (code.startsWith(query)) {
+        rank = 1;
+      } else if (name.startsWith(query)) {
+        rank = 2;
+      } else if (name.includes(query)) {
+        rank = 3;
+      }
+
+      return {
+        key: `building-${building.code}`,
+        value: `${building.code} - ${building.name}`,
+        title: building.code,
+        subtitle: building.name,
+        rank,
+      };
+    });
+
+    const roomMatches = SEARCH_SUGGESTIONS.filter((item) =>
       item.toLowerCase().includes(query)
-    );
-    const buildingMatches = BUILDING_RESULTS.filter((item) =>
-      item.toLowerCase().includes(query)
-    );
-    return [...matches, ...buildingMatches];
-  }, [recents, searchQuery]);
+    ).map((item, index) => ({
+      key: `room-${item}-${index}`,
+      value: item,
+      title: item,
+      subtitle: item.startsWith("ENG ") ? engBuilding?.name : undefined,
+      rank: item.toLowerCase().startsWith(query) ? 10 : 11,
+    }));
+
+    return [...buildingMatches, ...roomMatches].sort((left, right) => {
+      if (left.rank !== right.rank) {
+        return left.rank - right.rank;
+      }
+      return left.title.localeCompare(right.title);
+    });
+  }, [engBuilding?.name, recents, searchQuery]);
 
   const handleSelectSearch = (value: string) => {
-    const cleanValue = value.replace(/\\s+-\\s+.*/, "");
+    const cleanValue = value.replace(/\s+-\s+.*/, "");
     const roomSelected = ENG_ROOMS.includes(cleanValue) ? cleanValue : null;
     const buildingCode = roomSelected ? "ENG" : cleanValue;
     const building = TMU_BUILDINGS.find((entry) => entry.code === buildingCode) ?? null;
@@ -68,6 +145,7 @@ export default function HomeScreen() {
     if (building) {
       setSelectedBuilding(building);
       setSelectedRoom(roomSelected);
+      setSearchActive(false);
       setRecents((current) => {
         const next = [value, ...current.filter((item) => item !== value)];
         return next.slice(0, 5);
@@ -78,19 +156,25 @@ export default function HomeScreen() {
   const isFavorite = (value: string) => saved.favorites.includes(value);
   const isStarred = (value: string) => saved.starred.includes(value);
   const isWanted = (value: string) => saved.wantToGo.includes(value);
-  const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
+  const buildFallbackEntry = (code: string): BuildingEntry => ({
+    code,
+    name: code,
+    description: `${code} is part of the Toronto Metropolitan University campus map overlay.`,
+    accessibility: "Accessibility information will be updated soon.",
+    image: FALLBACK_BUILDING_IMAGE,
+  });
 
   const handleOverlayPress = (code: string) => {
-    const building = TMU_BUILDINGS.find((entry) => entry.code === code) ?? null;
-    if (!building) {
-      return;
-    }
+    Keyboard.dismiss();
+    setSearchActive(false);
+    const building = TMU_BUILDINGS.find((entry) => entry.code === code) ?? buildFallbackEntry(code);
     setSelectedBuilding(building);
     setSelectedRoom(null);
-    setRecents((current) => {
-      const next = [`${building.code} - ${building.name}`, ...current.filter((item) => !item.startsWith(`${building.code} - `))];
-      return next.slice(0, 5);
-    });
+  };
+
+  const dismissSearch = () => {
+    Keyboard.dismiss();
+    setSearchActive(false);
   };
 
   return (
@@ -108,13 +192,14 @@ export default function HomeScreen() {
         <MapView
           style={styles.mapView}
           initialRegion={TMU_REGION}
-          initialCamera={TMU_CAMERA}
-          provider={PROVIDER_GOOGLE}
+          initialCamera={isLegacyAndroid ? undefined : TMU_CAMERA}
           showsBuildings
           showsCompass
           toolbarEnabled={false}
           rotateEnabled={false}
+          moveOnMarkerPress={false}
           minZoomLevel={15.8}
+          onPress={dismissSearch}
         >
           {showCampusOverlays &&
             TMU_CAMPUS_OVERLAYS.map((overlay) => (
@@ -135,7 +220,7 @@ export default function HomeScreen() {
                 key={`${overlay.code}-label`}
                 coordinate={overlay.labelCoordinate}
                 anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges
+                tracksViewChanges={labelTracksViewChanges}
                 zIndex={1000}
                 onPress={() => handleOverlayPress(overlay.code)}
               >
@@ -155,7 +240,10 @@ export default function HomeScreen() {
             placeholderTextColor="#4a4a4a"
             value={searchQuery}
             onChangeText={setSearchQuery}
-            onFocus={() => setSelectedBuilding(null)}
+            onFocus={() => {
+              setSelectedBuilding(null);
+              setSearchActive(true);
+            }}
           />
           <Pressable>
             <IconSymbol name="microphone" color="#4a4a4a" size={20} />
@@ -169,7 +257,14 @@ export default function HomeScreen() {
 
           {!!selectedBuilding && (
             <View style={styles.detailCard}>
-              <Pressable onPress={() => setSelectedBuilding(null)}>
+              <Pressable
+                onPress={() => {
+                  setSelectedBuilding(null);
+                  setSelectedRoom(null);
+                  setSearchQuery("");
+                  setSearchActive(false);
+                }}
+              >
                 <Text style={styles.backText}>Back</Text>
               </Pressable>
               <View style={styles.detailHeader}>
@@ -207,35 +302,34 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {!selectedBuilding && filteredResults.length > 0 && (
+          {!selectedBuilding && searchActive && filteredResults.length > 0 && (
             <View style={styles.resultsCard}>
               <Text style={styles.resultsTitle}>{searchQuery ? "Results" : "Recent"}</Text>
               <ScrollView style={styles.resultsList}>
-                {filteredResults.map((item, index) => {
-                  const displayKey = item.includes(" - ") ? item.split(" - ")[0] : item;
+                {filteredResults.map((item) => {
                   return (
                     <Pressable
-                      key={`${item}-${index}`}
+                      key={item.key}
                       style={styles.resultItem}
-                      onPress={() => handleSelectSearch(item)}
+                      onPress={() => handleSelectSearch(item.value)}
                     >
                       <View style={styles.resultTitleRow}>
                         <View style={styles.markerSmall} />
-                        <Text style={styles.resultTitle}>{displayKey}</Text>
+                        <Text style={styles.resultTitle}>{item.title}</Text>
                         <View style={styles.resultIcons}>
-                          {isStarred(displayKey) && (
+                          {isStarred(item.title) && (
                             <IconSymbol name="star.fill" color="#2c3ea3" size={18} />
                           )}
-                          {isFavorite(displayKey) && (
+                          {isFavorite(item.title) && (
                             <IconSymbol name="heart.fill" color="#2c3ea3" size={18} />
                           )}
-                          {isWanted(displayKey) && (
+                          {isWanted(item.title) && (
                             <IconSymbol name="flag.fill" color="#2c3ea3" size={18} />
                           )}
                         </View>
                       </View>
-                      {item.includes(" - ") && (
-                        <Text style={styles.resultSubtitle}>{item.split(" - ")[1]}</Text>
+                      {item.subtitle && (
+                        <Text style={styles.resultSubtitle}>{item.subtitle}</Text>
                       )}
                     </Pressable>
                   );
