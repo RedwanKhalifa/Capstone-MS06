@@ -4,7 +4,6 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { IndoorRoutingMap } from "@/components/indoor-navigation/indoor-routing-map";
 import { usePositioning } from "@/context/positioning";
-import { FLOOR_PLANS, type PlanID } from "@/types/fingerprint";
 
 const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
 const HOLD_INTERVAL_MS = 120;
@@ -21,7 +20,6 @@ export default function IndoorNavigationScreen() {
   const requestedDestination =
     typeof params.destination === "string" ? params.destination : undefined;
   const [routeNodeIds, setRouteNodeIds] = useState<string[]>([]);
-  const currentPlanId = positioning.activePlanId;
   const [manualStep, setManualStep] = useState<number>(0.01);
   const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const holdStartRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -80,27 +78,6 @@ export default function IndoorNavigationScreen() {
       </Pressable>
 
       <Text style={styles.title}>Indoor Navigation</Text>
-
-      <View style={styles.planRow}>
-        {FLOOR_PLANS.map((plan) => (
-          <Pressable
-            key={plan.id}
-            style={[
-              styles.planButton,
-              currentPlanId === plan.id && styles.planButtonActive,
-            ]}
-            onPress={() => positioning.setActivePlan(plan.id)}>
-            <Text
-              style={
-                currentPlanId === plan.id
-                  ? styles.planButtonTextActive
-                  : styles.planButtonText
-              }>
-              {plan.title}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
 
       <View style={styles.mapContainer}>
         <IndoorRoutingMap destination={requestedDestination} onRouteComputed={setRouteNodeIds} />
@@ -215,19 +192,4 @@ const styles = StyleSheet.create({
     backgroundColor: "#eef2ff",
   },
   dpadText: { color: "#1e3a8a", fontWeight: "700" },
-  planRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
-  planButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#94a3b8",
-    backgroundColor: "#fff",
-  },
-  planButtonActive: {
-    backgroundColor: "#2c3ea3",
-    borderColor: "#1d4ed8",
-  },
-  planButtonText: { color: "#0f172a", fontWeight: "700" },
-  planButtonTextActive: { color: "#fff", fontWeight: "700" },
 });
