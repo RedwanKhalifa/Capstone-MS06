@@ -59,7 +59,7 @@ export type TrainingDataset = {
 export const BEACON_UUID_DEFAULT = 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE';
 
 export const FLOOR_PLANS: FloorPlanDefinition[] = [
-  { id: 'ENG4_NORTH', title: 'ENG4 North', image: require('@/assets/images/eng4_north.png') },
+  { id: 'ENG4_NORTH', title: 'ENG4 North', image: require('../assets/images/eng4_north.png') },
 ];
 
 export const RSSI_FLOOR = -100;

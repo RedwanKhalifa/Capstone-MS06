@@ -7,7 +7,13 @@ import { useAppState } from "../context/app-state";
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { accessibility, setAccessibility, isLoggedIn } = useAppState();
+  const {
+    accessibility,
+    setAccessibility,
+    isLoggedIn,
+    studentAccount,
+    logoutUser,
+  } = useAppState();
   const [unitsEnabled, setUnitsEnabled] = useState(true);
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState({
@@ -69,9 +75,22 @@ export default function SettingsScreen() {
 
       <Text style={styles.sectionTitle}>Account</Text>
       <View style={styles.row}>
-        <Text style={styles.rowText}>Login/Logout</Text>
+        <Text style={styles.rowText}>Manual account active</Text>
         <Switch value={isLoggedIn} onValueChange={() => {}} disabled />
       </View>
+      {studentAccount ? (
+        <View style={styles.accountCard}>
+          <Text style={styles.accountName}>{studentAccount.fullName}</Text>
+          <Text style={styles.accountEmail}>{studentAccount.schoolEmail}</Text>
+          <Pressable style={styles.accountButton} onPress={logoutUser}>
+            <Text style={styles.accountButtonText}>Log out</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Pressable style={styles.accountButton} onPress={() => router.push("/calendar-connect")}>
+          <Text style={styles.accountButtonText}>Create or log into account</Text>
+        </Pressable>
+      )}
       <Pressable
         style={styles.dropdownRow}
         onPress={() => setGuestInfoOpen((open) => !open)}
@@ -190,5 +209,31 @@ const styles = StyleSheet.create({
     color: "#f3d400",
     fontWeight: "700",
     textAlign: "center",
+  },
+  accountCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 8,
+    gap: 4,
+  },
+  accountName: {
+    color: "#2c3ea3",
+    fontWeight: "700",
+  },
+  accountEmail: {
+    color: "#4c5679",
+  },
+  accountButton: {
+    backgroundColor: "#2c3ea3",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginTop: 8,
+    alignSelf: "flex-start",
+  },
+  accountButtonText: {
+    color: "#f3d400",
+    fontWeight: "700",
   },
 });

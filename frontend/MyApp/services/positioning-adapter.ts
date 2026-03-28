@@ -1,6 +1,7 @@
 import { loadPoints, savePoints } from "@/lib/storage";
 import type { PlanID } from "@/types/fingerprint";
 import * as FileSystem from "expo-file-system/legacy";
+import { Platform } from "react-native";
 
 export type LivePosition = {
 	x: number;
@@ -17,8 +18,29 @@ const DEFAULT_STATE: PositioningState = {
 	points: [],
 	planName: "ENG4_NORTH"
 };
+const WEB_STORAGE_KEY = "capstone-ms06:positioning-state";
+
 async function loadState(): Promise<PositioningState> {
 	try {
+		if (Platform.OS === "web") {
+			const text = globalThis.localStorage?.getItem(WEB_STORAGE_KEY);
+			if (!text) return DEFAULT_STATE;
+			const parsed = { ...DEFAULT_STATE, ...(JSON.parse(text) as Partial<PositioningState>) };
+			const lastKnownPosition = parsed.lastKnownPosition ?? DEFAULT_STATE.lastKnownPosition;
+			return {
+				...parsed,
+				lastKnownPosition: {
+					x: Number.isFinite(lastKnownPosition.x) ? lastKnownPosition.x : DEFAULT_STATE.lastKnownPosition.x,
+					y: Number.isFinite(lastKnownPosition.y) ? lastKnownPosition.y : DEFAULT_STATE.lastKnownPosition.y,
+					timestamp: Number.isFinite(lastKnownPosition.timestamp)
+						? lastKnownPosition.timestamp
+						: Date.now(),
+					accuracy: lastKnownPosition.accuracy,
+					planId: lastKnownPosition.planId ?? parsed.planName,
+				}
+			};
+		}
+
 		const info = await FileSystem.getInfoAsync(FILE_URI);
 		if (!info.exists) return DEFAULT_STATE;
 		const text = await FileSystem.readAsStringAsync(FILE_URI);
@@ -40,7 +62,13 @@ async function loadState(): Promise<PositioningState> {
 		return DEFAULT_STATE;
 	}
 }
-async function saveState(state: PositioningState) { await FileSystem.writeAsStringAsync(FILE_URI, JSON.stringify(state)); }
+async function saveState(state: PositioningState) {
+	if (Platform.OS === "web") {
+		globalThis.localStorage?.setItem(WEB_STORAGE_KEY, JSON.stringify(state));
+		return;
+	}
+	await FileSystem.writeAsStringAsync(FILE_URI, JSON.stringify(state));
+}
 export async function getLivePosition() { return (await loadState()).lastKnownPosition; }
 export async function setLivePosition(
 	x: number,

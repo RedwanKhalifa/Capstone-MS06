@@ -1,6 +1,8 @@
 import { Buffer } from 'buffer';
+import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BleManager, type Device } from 'react-native-ble-plx';
+import { Platform } from 'react-native';
+import type { Device } from 'react-native-ble-plx';
 
 import { BEACON_UUID_DEFAULT, type BeaconReading } from '@/types/fingerprint';
 
@@ -11,6 +13,34 @@ const LAST_SEEN_HEARTBEAT_MS = 500;
 
 const toHex = (value: string) => Buffer.from(value, 'base64').toString('hex').toLowerCase();
 const normalizeUuid = (value: string) => value.trim().toLowerCase();
+
+type BleManagerType = {
+  startDeviceScan: (
+    uuids: string[] | null,
+    options: { allowDuplicates?: boolean } | null,
+    callback: (error: { message?: string } | null, device: Device | null) => void
+  ) => void;
+  stopDeviceScan: () => void;
+};
+
+type BleManagerCtor = new () => BleManagerType;
+
+let BleManagerClass: BleManagerCtor | null | undefined;
+
+function loadBleManagerClass() {
+  if (Platform.OS === 'web') return null;
+  if (Constants.appOwnership === 'expo') return null;
+  if (BleManagerClass !== undefined) return BleManagerClass;
+
+  try {
+    const blePlx = require('react-native-ble-plx') as { BleManager?: BleManagerCtor };
+    BleManagerClass = blePlx.BleManager ?? null;
+  } catch {
+    BleManagerClass = null;
+  }
+
+  return BleManagerClass;
+}
 
 const parseIBeacon = (device: Device) => {
   if (!device.manufacturerData || device.rssi == null) return null;
@@ -30,14 +60,26 @@ const parseIBeacon = (device: Device) => {
 };
 
 export const useBeaconRanger = (uuidFilter: string) => {
-  const manager = useMemo(() => new BleManager(), []);
+  const manager = useMemo(() => {
+    const BleManager = loadBleManagerClass();
+    if (!BleManager) return null;
+    try {
+      return new BleManager();
+    } catch {
+      return null;
+    }
+  }, []);
   const [beacons, setBeacons] = useState<Record<string, BeaconReading>>({});
   const [isScanning, setIsScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanError, setScanError] = useState<string | null>(() => {
+    if (Platform.OS === 'web') return 'Bluetooth scanning is unavailable on web.';
+    if (Constants.appOwnership === 'expo') return 'Bluetooth scanning is unavailable in Expo Go.';
+    return null;
+  });
 
   useEffect(() => {
     return () => {
-      manager.stopDeviceScan();
+      manager?.stopDeviceScan();
     };
   }, [manager]);
 
@@ -90,6 +132,16 @@ export const useBeaconRanger = (uuidFilter: string) => {
   );
 
   const start = useCallback(async () => {
+    if (!manager) {
+      const message =
+        Platform.OS === 'web'
+          ? 'Bluetooth scanning is unavailable on web.'
+          : 'Bluetooth scanning is unavailable in this build.';
+      setScanError(message);
+      setIsScanning(false);
+      throw new Error(message);
+    }
+
     setScanError(null);
     setIsScanning(true);
     manager.startDeviceScan(null, { allowDuplicates: true }, (error, d) => {
@@ -103,7 +155,7 @@ export const useBeaconRanger = (uuidFilter: string) => {
   }, [manager, upsert]);
 
   const stop = useCallback(() => {
-    manager.stopDeviceScan();
+    manager?.stopDeviceScan();
     setIsScanning(false);
   }, [manager]);
 

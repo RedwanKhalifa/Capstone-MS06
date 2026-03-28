@@ -152,7 +152,7 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     prevRef.current = null;
     setPrediction(null);
     setLiveConfidence(null);
-    start();
+    await start();
     setLiveMode('bluetooth');
     setIsLiveRunning(true);
   }, [start, clear, refreshKnnCache, setLiveMode]);
@@ -169,7 +169,7 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     const granted = await requestBlePermissions();
     if (!granted) throw new Error('BLE permissions not granted');
     clear();
-    start();
+    await start();
   }, [start, clear]);
 
   const stopScan = useCallback(() => {
