@@ -1,6 +1,6 @@
+import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import { type CalendarClassEvent, useAppState } from "../../context/app-state";
@@ -72,8 +72,8 @@ export default function SavedScreen() {
           <Text style={styles.emptySavedText}>Save a room from your schedule cards below.</Text>
         ) : (
           <View style={styles.groupCard}>
-            {visibleItems.map((item) => (
-              <View key={item} style={styles.locationRow}>
+            {visibleItems.map((item, index) => (
+              <View key={`${item}-${index}`} style={styles.locationRow}>
                 <View style={styles.marker} />
                 <View>
                   <Text style={styles.locationTitle}>{item}</Text>

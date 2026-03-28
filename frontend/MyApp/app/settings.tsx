@@ -5,6 +5,13 @@ import { useRouter } from "expo-router";
 import { IconSymbol } from "../components/ui/icon-symbol";
 import { useAppState } from "../context/app-state";
 
+const ABOUT_ITEMS = [
+  { key: "project", label: "Project info" },
+  { key: "team", label: "Team MS06" },
+  { key: "version", label: "Version" },
+  { key: "privacy", label: "Privacy" },
+] as const;
+
 export default function SettingsScreen() {
   const router = useRouter();
   const {
@@ -101,12 +108,7 @@ export default function SettingsScreen() {
       {guestInfoOpen && <Text style={styles.dropdownText}>Soon to be updated.</Text>}
 
       <Text style={styles.sectionTitle}>About</Text>
-      {[
-        { key: "project", label: "Project info" },
-        { key: "team", label: "Team MS06" },
-        { key: "version", label: "Version" },
-        { key: "privacy", label: "Privacy" },
-      ].map((item) => (
+      {ABOUT_ITEMS.map((item) => (
         <View key={item.key}>
           <Pressable
             style={styles.dropdownRow}
@@ -116,12 +118,12 @@ export default function SettingsScreen() {
           >
             <Text style={styles.rowText}>{item.label}</Text>
             <IconSymbol
-              name={aboutOpen[item.key as keyof typeof aboutOpen] ? "chevron.up" : "chevron.down"}
+              name={aboutOpen[item.key] ? "chevron.up" : "chevron.down"}
               color="#f3d400"
               size={24}
             />
           </Pressable>
-          {aboutOpen[item.key as keyof typeof aboutOpen] && (
+          {aboutOpen[item.key] && (
             <Text style={styles.dropdownText}>Soon to be updated.</Text>
           )}
         </View>

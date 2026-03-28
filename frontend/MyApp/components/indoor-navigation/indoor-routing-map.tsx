@@ -31,11 +31,18 @@ type Props = {
 
 const { width: screenWidth } = Dimensions.get("window");
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-const NAV_FLOOR = 4;
+const PLAN_FLOORS: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", number> = {
+  ENG4_NORTH: 4,
+  ENG4_SOUTH: 5,
+  ENG3_NORTH: 3,
+  ENG3_SOUTH: 2,
+  HOME_MAIN: 40,
+};
 const CANONICAL_IMAGE_WIDTH = 800;
 const CANONICAL_IMAGE_HEIGHT = 600;
 const MIN_RENDER_WIDTH = 1200;
 const MAX_RENDER_WIDTH = 1800;
+const MAX_DRAW_PIXELS = 40_000_000;
 const EDIT_STEPS = [2, 4, 8] as const;
 const EDGE_TAP_THRESHOLD_PX = 18;
 const LIVE_DOT_BASE_RADIUS = 11;
@@ -44,14 +51,27 @@ const SIM_DOT_BASE_RADIUS = 12;
 const TEMP_START_NODE_ID = "__TEMP_START__";
 const SIM_LOOP_PAUSE_MS = 500;
 const DESTINATION_REACHED_THRESHOLD_PX = 9;
+const ROUTING_GRAPH_VERSION = 3;
 
-const ROOM_TO_NODE: Record<string, string> = {
-  ENG103: "N12",
-  LIB072: "N2",
-  ENG: "N3",
+const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", Record<string, string>> = {
+  ENG4_NORTH: {
+    ENG103: "N12",
+    LIB072: "N2",
+    ENG: "N3",
+  },
+  ENG4_SOUTH: {},
+  ENG3_NORTH: {},
+  ENG3_SOUTH: {},
+  HOME_MAIN: {},
 };
 
-const FLOOR_4_IMAGE = require("../../assets/images/eng4_north.png");
+const PLAN_IMAGES: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", any> = {
+  ENG4_NORTH: require("../../assets/images/eng4_north.png"),
+  ENG4_SOUTH: require("../../assets/images/eng4_south.png"),
+  ENG3_NORTH: require("../../assets/images/eng3_north.png"),
+  ENG3_SOUTH: require("../../assets/images/eng3_south.png"),
+  HOME_MAIN: require("../../assets/images/HomeFloorPlan-1.png"),
+};
 
 const DEFAULT_NODES: GraphNode[] = [
   { id: "3N1", x: 455, y: 180, floor: 3 },
@@ -64,12 +84,12 @@ const DEFAULT_NODES: GraphNode[] = [
   { id: "3N8", x: 730, y: 410, floor: 3 },
   { id: "N1", x: 664, y: 295, floor: 4 },
   { id: "N2", x: 664, y: 195, floor: 4 },
-  { id: "N3", x: 444, y: 195, floor: 4 },
-  { id: "N4", x: 350, y: 195, floor: 4 },
-  { id: "N5", x: 350, y: 215, floor: 4 },
-  { id: "N6", x: 425, y: 215, floor: 4 },
+  { id: "N3", x: 444, y: 187, floor: 4 },
+  { id: "N4", x: 352, y: 195, floor: 4 },
+  { id: "N5", x: 352, y: 217, floor: 4 },
+  { id: "N6", x: 425, y: 217, floor: 4 },
   { id: "N7", x: 425, y: 260, floor: 4 },
-  { id: "N8", x: 350, y: 260, floor: 4 },
+  { id: "N8", x: 352, y: 260, floor: 4 },
   { id: "N9", x: 443, y: 260, floor: 4 },
   { id: "N11", x: 444, y: 385, floor: 4 },
   { id: "N12", x: 663, y: 385, floor: 4 },
@@ -77,22 +97,29 @@ const DEFAULT_NODES: GraphNode[] = [
   { id: "N14", x: 555, y: 195, floor: 4 },
   { id: "N15", x: 628, y: 195, floor: 4 },
   { id: "N16", x: 443, y: 299, floor: 4 },
-  { id: "N17", x: 443, y: 342, floor: 4 },
+  { id: "N17", x: 443, y: 344, floor: 4 },
   { id: "N18", x: 473, y: 385, floor: 4 },
   { id: "N19", x: 530, y: 385, floor: 4 },
   { id: "N20", x: 579, y: 385, floor: 4 },
   { id: "N21", x: 626, y: 385, floor: 4 },
   { id: "N22", x: 663, y: 341, floor: 4 },
   { id: "N23", x: 390, y: 260, floor: 4 },
-  { id: "N24", x: 389, y: 215, floor: 4 },
+  { id: "N24", x: 389, y: 217, floor: 4 },
   { id: "N25", x: 425, y: 238, floor: 4 },
-  { id: "N26", x: 350, y: 237, floor: 4 },
+  { id: "N26", x: 352, y: 237, floor: 4 },
   { id: "N27", x: 401, y: 195, floor: 4 },
   { id: "N28", x: 523, y: 195, floor: 4 },
   { id: "N29", x: 588, y: 195, floor: 4 },
   { id: "N30", x: 465, y: 385, floor: 4 },
   { id: "N31", x: 463, y: 297, floor: 4 },
   { id: "N32", x: 646, y: 295, floor: 4 },
+  { id: "N33", x: 444, y: 369, floor: 4 },
+  { id: "H1", x: 357, y: 483, floor: 40 },
+  { id: "H2", x: 407, y: 483, floor: 40 },
+  { id: "H3", x: 409, y: 375, floor: 40 },
+  { id: "H4", x: 355, y: 375, floor: 40 },
+  { id: "H5", x: 411, y: 263, floor: 40 },
+  { id: "H6", x: 409, y: 151, floor: 40 },
 ];
 
 const DEFAULT_EDGES: Record<string, Edge[]> = {
@@ -106,35 +133,42 @@ const DEFAULT_EDGES: Record<string, Edge[]> = {
   "3N8": [{ target: "3N7", weight: 110 }, { target: "3N6", weight: 275 }],
   N1: [{ target: "N2", weight: 100 }, { target: "N22", weight: 46 }, { target: "N32", weight: 18 }],
   N2: [{ target: "N1", weight: 100 }, { target: "N15", weight: 36 }],
-  N3: [{ target: "N9", weight: 65 }, { target: "N13", weight: 38 }, { target: "N27", weight: 43 }],
-  N4: [{ target: "N5", weight: 20 }, { target: "N27", weight: 51 }],
-  N5: [{ target: "N4", weight: 20 }, { target: "N24", weight: 39 }, { target: "N26", weight: 22 }],
-  N6: [{ target: "N24", weight: 36 }, { target: "N25", weight: 23 }],
+  N3: [{ target: "N9", weight: 73 }, { target: "N13", weight: 39 }, { target: "N27", weight: 44 }],
+  N4: [{ target: "N5", weight: 22 }, { target: "N27", weight: 49 }],
+  N5: [{ target: "N4", weight: 22 }, { target: "N24", weight: 37 }, { target: "N26", weight: 20 }],
+  N6: [{ target: "N24", weight: 36 }, { target: "N25", weight: 21 }],
   N7: [{ target: "N9", weight: 18 }, { target: "N23", weight: 35 }, { target: "N25", weight: 22 }],
-  N8: [{ target: "N23", weight: 40 }, { target: "N26", weight: 23 }],
-  N9: [{ target: "N3", weight: 65 }, { target: "N7", weight: 18 }, { target: "N16", weight: 39 }],
-  N11: [{ target: "N17", weight: 43 }, { target: "N30", weight: 21 }],
+  N8: [{ target: "N23", weight: 38 }, { target: "N26", weight: 23 }],
+  N9: [{ target: "N3", weight: 73 }, { target: "N7", weight: 18 }, { target: "N16", weight: 39 }],
+  N11: [{ target: "N33", weight: 16 }, { target: "N30", weight: 21 }],
   N12: [{ target: "N21", weight: 37 }, { target: "N22", weight: 44 }],
-  N13: [{ target: "N3", weight: 38 }, { target: "N28", weight: 41 }],
+  N13: [{ target: "N3", weight: 39 }, { target: "N28", weight: 41 }],
   N14: [{ target: "N28", weight: 32 }, { target: "N29", weight: 33 }],
   N15: [{ target: "N2", weight: 36 }, { target: "N29", weight: 40 }],
-  N16: [{ target: "N17", weight: 43 }, { target: "N31", weight: 20 }, { target: "N9", weight: 39 }],
-  N17: [{ target: "N11", weight: 43 }, { target: "N16", weight: 43 }],
+  N16: [{ target: "N17", weight: 45 }, { target: "N31", weight: 20 }, { target: "N9", weight: 39 }],
+  N17: [{ target: "N16", weight: 45 }, { target: "N33", weight: 25 }],
   N18: [{ target: "N19", weight: 57 }, { target: "N30", weight: 8 }],
   N19: [{ target: "N18", weight: 57 }, { target: "N20", weight: 49 }],
   N20: [{ target: "N19", weight: 49 }, { target: "N21", weight: 47 }],
   N21: [{ target: "N12", weight: 37 }, { target: "N20", weight: 47 }],
   N22: [{ target: "N1", weight: 46 }, { target: "N12", weight: 44 }],
-  N23: [{ target: "N7", weight: 35 }, { target: "N8", weight: 40 }],
-  N24: [{ target: "N5", weight: 39 }, { target: "N6", weight: 36 }],
-  N25: [{ target: "N6", weight: 23 }, { target: "N7", weight: 22 }],
-  N26: [{ target: "N5", weight: 22 }, { target: "N8", weight: 23 }],
-  N27: [{ target: "N3", weight: 43 }, { target: "N4", weight: 51 }],
+  N23: [{ target: "N7", weight: 35 }, { target: "N8", weight: 38 }],
+  N24: [{ target: "N5", weight: 37 }, { target: "N6", weight: 36 }],
+  N25: [{ target: "N6", weight: 21 }, { target: "N7", weight: 22 }],
+  N26: [{ target: "N5", weight: 20 }, { target: "N8", weight: 23 }],
+  N27: [{ target: "N3", weight: 44 }, { target: "N4", weight: 49 }],
   N28: [{ target: "N13", weight: 41 }, { target: "N14", weight: 32 }],
   N29: [{ target: "N14", weight: 33 }, { target: "N15", weight: 40 }],
-  N30: [{ target: "N11", weight: 21 }, { target: "N18", weight: 8 }, { target: "N31", weight: 88 }],
+  N30: [{ target: "N18", weight: 8 }, { target: "N31", weight: 88 }, { target: "N11", weight: 21 }],
   N31: [{ target: "N30", weight: 88 }, { target: "N16", weight: 20 }],
   N32: [{ target: "N1", weight: 18 }],
+  N33: [{ target: "N11", weight: 16 }, { target: "N17", weight: 25 }],
+  H1: [{ target: "H2", weight: 50 }, { target: "H4", weight: 108 }, { target: "H3", weight: 120 }],
+  H2: [{ target: "H1", weight: 50 }, { target: "H3", weight: 108 }, { target: "H4", weight: 120 }],
+  H3: [{ target: "H2", weight: 108 }, { target: "H4", weight: 54 }, { target: "H1", weight: 120 }, { target: "H5", weight: 112 }],
+  H4: [{ target: "H3", weight: 54 }, { target: "H1", weight: 108 }, { target: "H2", weight: 120 }],
+  H5: [{ target: "H3", weight: 112 }, { target: "H6", weight: 112 }],
+  H6: [{ target: "H5", weight: 112 }],
 };
 
 const DEFAULT_GRAPH: RoutingGraph = {
@@ -252,14 +286,27 @@ function withEuclideanEdgeWeights(
 
 export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const positioning = usePositioning();
-  const resolvedImage = RNImage.resolveAssetSource(FLOOR_4_IMAGE);
+  const activePlanId = (positioning as any).activePlanId as "ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN" ?? "ENG4_NORTH";
+  const isRoutingPlan = true;
+  const activeFloor = PLAN_FLOORS[activePlanId];
+  const activeImage = PLAN_IMAGES[activePlanId];
+  const resolvedImage = RNImage.resolveAssetSource(activeImage);
   const sourceWidth = resolvedImage.width || CANONICAL_IMAGE_WIDTH;
   const sourceHeight = resolvedImage.height || CANONICAL_IMAGE_HEIGHT;
+  const pixelRatio = PixelRatio.get();
+  const sourceAspect = sourceHeight / sourceWidth;
   // Keep enough raster detail for sharpness on high-density screens without using full source size.
   const qualityTargetWidth = Math.ceil((screenWidth - 40) * PixelRatio.get() * 2.2);
+  // react-native-svg can rasterize transformed content to very large bitmaps on Android.
+  // Cap base width so max zoom does not exceed a safe total pixel area.
+  const zoomForBudget = 3;
+  const safeWidthFromBudget = Math.floor(
+    Math.sqrt(MAX_DRAW_PIXELS / Math.max(0.01, sourceAspect * (zoomForBudget * pixelRatio) ** 2))
+  );
+  const maxSafeRenderWidth = Math.max(900, safeWidthFromBudget);
   const renderTargetWidth = Math.min(
     sourceWidth,
-    Math.min(MAX_RENDER_WIDTH, Math.max(qualityTargetWidth, MIN_RENDER_WIDTH))
+    Math.min(MAX_RENDER_WIDTH, maxSafeRenderWidth, Math.max(qualityTargetWidth, MIN_RENDER_WIDTH))
   );
   const renderScale = Math.min(1, renderTargetWidth / sourceWidth);
   const imageWidth = Math.round(sourceWidth * renderScale);
@@ -298,6 +345,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const cropHeight = 420;
   // Cover-based min scale prevents immediate snap-back when panning.
   const minScale = Math.max(cropWidth / imageWidth, cropHeight / imageHeight);
+  const safeMaxScale = Math.max(
+    minScale,
+    Math.min(3, Math.sqrt(MAX_DRAW_PIXELS / Math.max(1, imageWidth * imageHeight * pixelRatio * pixelRatio)))
+  );
   const markerScale = Math.max(0.4, zoomScale);
   const liveDotRadius = Math.max(4, Math.min(24, LIVE_DOT_BASE_RADIUS / markerScale));
   const liveDotStrokeWidth = Math.max(1, Math.min(8, LIVE_DOT_BASE_STROKE / markerScale));
@@ -312,9 +363,18 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   });
 
   useEffect(() => {
+    if (isRoutingPlan) return;
+    stopPathSimulation();
+    setSelectedEndId(null);
+    setSelectedStartId(null);
+    setFloorPaths({});
+    if (onRouteComputed) onRouteComputed([]);
+  }, [isRoutingPlan, onRouteComputed]);
+
+  useEffect(() => {
     let active = true;
     void (async () => {
-      const loaded = await loadRoutingGraph(DEFAULT_GRAPH);
+      const loaded = await loadRoutingGraph(DEFAULT_GRAPH, ROUTING_GRAPH_VERSION);
       if (!active) return;
       setGraph({
         nodes: loaded.nodes,
@@ -334,7 +394,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
   useEffect(() => {
     if (!graphLoaded) return;
-    void saveRoutingGraph({ ...graph, edges: weightedEdges });
+    void saveRoutingGraph({ ...graph, edges: weightedEdges }, ROUTING_GRAPH_VERSION);
   }, [graph, weightedEdges, graphLoaded]);
 
   const moveEditingNode = (dx: number, dy: number) => {
@@ -372,13 +432,40 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     edges[from] = (edges[from] || []).filter((e) => e.target !== to);
   };
 
-  const generateNextNodeId = (nodes: GraphNode[]) => {
+  const generateNextNodeId = (nodes: GraphNode[], prefix: "N" | "H" | "3N" = "N") => {
     const maxN = nodes.reduce((max, n) => {
-      const match = n.id.match(/^N(\d+)$/);
+      const match = n.id.match(new RegExp(`^${prefix}(\\d+)$`));
       if (!match) return max;
       return Math.max(max, Number(match[1]));
     }, 0);
-    return `N${maxN + 1}`;
+    return `${prefix}${maxN + 1}`;
+  };
+
+  const addSeedNodeAtLivePosition = () => {
+    const prefix = activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N";
+    const x = Math.round(Math.max(0, Math.min(CANONICAL_IMAGE_WIDTH, livePointNorm.x * CANONICAL_IMAGE_WIDTH)));
+    const y = Math.round(Math.max(0, Math.min(CANONICAL_IMAGE_HEIGHT, livePointNorm.y * CANONICAL_IMAGE_HEIGHT)));
+
+    let createdNodeId: string | null = null;
+    setGraph((prev) => {
+      const newId = generateNextNodeId(prev.nodes, prefix);
+      const newNode: GraphNode = { id: newId, x, y, floor: activeFloor };
+      createdNodeId = newId;
+      return {
+        ...prev,
+        nodes: [...prev.nodes, newNode],
+        edges: {
+          ...prev.edges,
+          [newId]: prev.edges[newId] || [],
+        },
+      };
+    });
+
+    if (createdNodeId) {
+      setEditingNodeId(createdNodeId);
+      setEdgeNodeA(createdNodeId);
+      setEdgeNodeB(null);
+    }
   };
 
   const addEdgeFromSelectedNode = () => {
@@ -410,7 +497,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           y: source.y,
         };
 
-      const newId = generateNextNodeId(prev.nodes);
+      const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
       const newNode: GraphNode = {
         id: newId,
         x: Math.round(nextPos.x),
@@ -484,7 +571,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   };
 
   const handleMapTap = (event: any) => {
-    if (!isEditMode) return;
+    if (!isRoutingPlan || !isEditMode) return;
     const tapX = typeof event?.locationX === "number" ? event.locationX : event?.x;
     const tapY = typeof event?.locationY === "number" ? event.locationY : event?.y;
     if (typeof tapX !== "number" || typeof tapY !== "number") return;
@@ -539,12 +626,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         const to = prev.nodes.find((n) => n.id === best.toId);
         if (!from || !to) return prev;
 
-        const newId = generateNextNodeId(prev.nodes);
+        const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
         const newNode: GraphNode = {
           id: newId,
           x: Math.round(best.x),
           y: Math.round(best.y),
-          floor: NAV_FLOOR,
+          floor: activeFloor,
         };
 
         const nextEdges: Record<string, Edge[]> = { ...prev.edges };
@@ -565,7 +652,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         };
       });
 
-      const newNodeId = generateNextNodeId(graph.nodes);
+      const newNodeId = generateNextNodeId(graph.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
       setEditingNodeId(newNodeId);
       setEdgeNodeA(best.fromId);
       setEdgeNodeB(newNodeId);
@@ -585,8 +672,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   };
 
   const nodesOnCurrentFloor = useMemo(
-    () => graph.nodes.filter((node) => node.floor === NAV_FLOOR),
-    [graph.nodes]
+    () => (isRoutingPlan ? graph.nodes.filter((node) => node.floor === activeFloor) : []),
+    [activeFloor, graph.nodes, isRoutingPlan]
   );
 
   const selectedEndNodeOnCurrentFloor = useMemo(
@@ -700,7 +787,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   }, [isNavigateMode]);
 
   useEffect(() => {
-    if (animationRef.current && simulatedFloor !== null && simulatedFloor !== NAV_FLOOR) {
+    if (animationRef.current && simulatedFloor !== null && simulatedFloor !== activeFloor) {
       try {
         animationRef.current.stop();
       } catch {}
@@ -720,7 +807,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         } catch {}
       }
     }
-  }, [simulatedFloor]);
+  }, [activeFloor, simulatedFloor]);
 
   useEffect(() => {
     return () => {
@@ -731,14 +818,19 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   useEffect(() => {
     if (!destination) return;
 
-    const mappedEnd = ROOM_TO_NODE[destination];
+    const normalized = destination.trim().toUpperCase();
+    const mappedByRoom = PLAN_ROOM_TO_NODE[activePlanId]?.[normalized];
+    const mappedByNodeId = graph.nodes.find(
+      (node) => node.id.toUpperCase() === normalized && node.floor === activeFloor
+    )?.id;
+    const mappedEnd = mappedByRoom ?? mappedByNodeId;
     if (!mappedEnd) return;
 
     const endNode = graph.nodes.find((node) => node.id === mappedEnd);
-    if (!endNode || endNode.floor !== NAV_FLOOR) return;
+    if (!endNode || endNode.floor !== activeFloor) return;
 
     setSelectedEndId(mappedEnd);
-  }, [destination, graph.nodes]);
+  }, [activeFloor, activePlanId, destination, graph.nodes]);
 
   useEffect(() => {
     if (!positioning.prediction) return;
@@ -760,7 +852,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     if (!isNavigateMode || !imageZoomRef.current) return;
     const renderedX = Math.max(0, Math.min(imageWidth, livePointNorm.x * imageWidth));
     const renderedY = Math.max(0, Math.min(imageHeight, livePointNorm.y * imageHeight));
-    const targetScale = Math.max(minScale, 2.1);
+    const targetScale = Math.min(safeMaxScale, Math.max(minScale, 2.1));
     const targetX = imageWidth / 2 - renderedX;
     const targetY = imageHeight / 2 - renderedY;
 
@@ -772,12 +864,13 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     });
     zoomScaleRef.current = targetScale;
     setZoomScale(targetScale);
-  }, [cropHeight, cropWidth, imageHeight, imageWidth, isNavigateMode, livePointNorm.x, livePointNorm.y, minScale]);
+  }, [cropHeight, cropWidth, imageHeight, imageWidth, isNavigateMode, livePointNorm.x, livePointNorm.y, minScale, safeMaxScale]);
 
   useEffect(() => {
+    if (!isRoutingPlan) return;
     if (!selectedEndId) return;
     const endNode = graph.nodes.find((node) => node.id === selectedEndId);
-    if (!endNode || endNode.floor !== NAV_FLOOR) return;
+    if (!endNode || endNode.floor !== activeFloor) return;
 
     const liveCanonical = {
       x: livePointNorm.x * CANONICAL_IMAGE_WIDTH,
@@ -792,9 +885,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     setFloorPaths((prev) => ({ ...prev, [endNode.floor]: [] }));
     if (onRouteComputed) onRouteComputed([]);
     Alert.alert("Destination Reached");
-  }, [graph.nodes, livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId]);
+  }, [graph.nodes, isRoutingPlan, livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId]);
 
   useEffect(() => {
+    if (!isRoutingPlan) return;
     if (!selectedEndId) return;
 
     const endNode = graph.nodes.find((node) => node.id === selectedEndId);
@@ -819,7 +913,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     let routeEdges = floorEdges;
     let autoStartId: string | null = null;
 
-    if (endNode.floor === NAV_FLOOR && floorNodes.length >= 2) {
+    if (endNode.floor === activeFloor && floorNodes.length >= 2) {
       const nodeById = new Map(floorNodes.map((node) => [node.id, node]));
       const seen = new Set<string>();
       let best:
@@ -886,7 +980,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     }
 
     if (!autoStartId) {
-      if (endNode.floor === NAV_FLOOR) {
+      if (endNode.floor === activeFloor) {
         autoStartId = nearestNodeId(floorNodes, liveCanonical.x, liveCanonical.y);
       }
       if (!autoStartId) autoStartId = floorNodes[0]?.id ?? null;
@@ -918,11 +1012,13 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   }, [
     livePointNorm.x,
     livePointNorm.y,
+    isRoutingPlan,
     onRouteComputed,
     selectedEndId,
     selectedStartId,
     graph.nodes,
     weightedEdges,
+    activeFloor,
     isNavigateMode,
   ]);
 
@@ -940,8 +1036,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       return;
     }
 
-    if (endNode.floor !== NAV_FLOOR) {
-      Alert.alert("Only 4th floor is enabled right now.");
+    if (endNode.floor !== activeFloor) {
+      Alert.alert("Destination node is on a different plan/floor.");
       return;
     }
 
@@ -963,7 +1059,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     });
   };
 
-  const currentPathPoints = floorPaths[NAV_FLOOR] || [];
+  const currentPathPoints = floorPaths[activeFloor] || [];
   const renderedPathPoints = currentPathPoints.map(toRenderedPoint);
   const shouldShowNodes = isEditMode || showNodes;
 
@@ -984,7 +1080,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 setSelectedEndId(null);
                 setSelectedStartId(null);
                 stopPathSimulation();
-                setFloorPaths((prev) => ({ ...prev, [NAV_FLOOR]: [] }));
+                setFloorPaths((prev) => ({ ...prev, [activeFloor]: [] }));
                 if (onRouteComputed) onRouteComputed([]);
               }}
               style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
@@ -1061,6 +1157,11 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
             ) : null}
 
             <View style={styles.editActionsRow}>
+              {nodesOnCurrentFloor.length === 0 ? (
+                <TouchableOpacity style={styles.editActionBtn} onPress={addSeedNodeAtLivePosition}>
+                  <Text style={styles.editActionText}>Add First Node</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={[styles.editActionBtn, isAddNodeMode && styles.editActionBtnActive]}
                 onPress={() => setIsAddNodeMode((prev) => !prev)}>
@@ -1172,7 +1273,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         imageWidth={imageWidth}
         imageHeight={imageHeight}
         minScale={minScale}
-        maxScale={3}
+        maxScale={safeMaxScale}
         onMove={(event: any) => {
           const nextScale = typeof event?.scale === "number" && Number.isFinite(event.scale) ? event.scale : 1;
           if (Math.abs(nextScale - zoomScaleRef.current) < 0.02) return;
@@ -1183,7 +1284,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         enableCenterFocus={false}>
         <View>
           <ExpoImage
-            source={FLOOR_4_IMAGE}
+            source={activeImage}
             style={{ width: imageWidth, height: imageHeight }}
             contentFit="contain"
             contentPosition="center"
@@ -1192,7 +1293,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           />
 
           <Svg width={imageWidth} height={imageHeight} style={StyleSheet.absoluteFillObject}>
-            {renderedPathPoints.length > 1 && (
+            {isRoutingPlan && renderedPathPoints.length > 1 && (
               <Polyline
                 points={renderedPathPoints.map((point) => `${point.x},${point.y}`).join(" ")}
                 fill="none"
@@ -1201,7 +1302,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
               />
             )}
 
-            {shouldShowNodes
+            {isRoutingPlan && shouldShowNodes
               ? nodesOnCurrentFloor.map((node) => (
                   <G key={node.id}>
                     <Circle
@@ -1260,24 +1361,22 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 ))
               : null}
 
-            {isSimulating && simulatedFloor === NAV_FLOOR && (() => {
-              const active = locationAnims.current[NAV_FLOOR];
+            {isRoutingPlan && isSimulating && simulatedFloor === activeFloor && (() => {
+              const active = locationAnims.current[activeFloor];
               if (!active) return null;
               return <AnimatedCircle cx={active.x} cy={active.y} r={simDotRadius} fill="dodgerblue" />;
             })()}
 
-            {NAV_FLOOR === 4 ? (
-              <AnimatedCircle
-                cx={liveAnim.x}
-                cy={liveAnim.y}
-                r={liveDotRadius}
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth={liveDotStrokeWidth}
-              />
-            ) : null}
+            <AnimatedCircle
+              cx={liveAnim.x}
+              cy={liveAnim.y}
+              r={liveDotRadius}
+              fill="#2563eb"
+              stroke="#ffffff"
+              strokeWidth={liveDotStrokeWidth}
+            />
 
-            {Object.entries(edgesOnCurrentFloor).map(([fromId, edgeList]) =>
+            {isRoutingPlan && Object.entries(edgesOnCurrentFloor).map(([fromId, edgeList]) =>
               edgeList.map((edge, index) => {
                 const from = nodesOnCurrentFloor.find((node) => node.id === fromId);
                 const to = nodesOnCurrentFloor.find((node) => node.id === edge.target);
@@ -1294,7 +1393,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
               })
             )}
 
-            {selectedEndNodeOnCurrentFloor ? (
+            {isRoutingPlan && selectedEndNodeOnCurrentFloor ? (
               <G>
                 <Circle
                   cx={selectedEndNodeOnCurrentFloor.x * scaleX}

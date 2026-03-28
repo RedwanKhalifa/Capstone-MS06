@@ -17,7 +17,7 @@ import { loadDataset, loadPositioningMode, savePositioningMode, type Positioning
 import { getLivePosition, setLivePosition, setPlanName, type LivePosition } from '@/services/positioning-adapter';
 import { BEACON_UUID_DEFAULT, type BeaconReading, type PlanID } from '@/types/fingerprint';
 
-const PLAN_ID: PlanID = 'ENG4_NORTH';
+const DEFAULT_PLAN_ID: PlanID = 'ENG4_NORTH';
 const INFERENCE_INTERVAL_MS = 1000;
 
 export type PositioningContextValue = {
@@ -35,8 +35,10 @@ export type PositioningContextValue = {
   /** True while the KNN inference loop is actively running. */
   isLiveRunning: boolean;
   liveConfidence: number | null;
+  activePlanId: PlanID;
+  setActivePlan: (planId: PlanID) => void;
   /** Start BLE scan AND run KNN inference (live position mode). */
-  startBluetooth: () => Promise<void>;
+  startBluetooth: (planId?: PlanID) => Promise<void>;
   /** Stop inference and BLE scan. */
   stopBluetooth: () => void;
   /** Start BLE scan only – no inference (used by fingerprint collection tab). */
@@ -45,7 +47,7 @@ export type PositioningContextValue = {
   stopScan: () => void;
   clearBeacons: () => void;
   /** Publish a manually-chosen position without BLE. Stops any active scan. */
-  setManualPosition: (x: number, y: number) => void;
+  setManualPosition: (x: number, y: number, planId?: PlanID) => void;
   /**
    * Call after saving a new fingerprint dataset so the context reloads the
    * KNN cache from storage.
@@ -62,18 +64,19 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
   const [prediction, setPrediction] = useState<LivePosition | null>(null);
   const [liveConfidence, setLiveConfidence] = useState<number | null>(null);
   const [datasetVersion, setDatasetVersion] = useState(0);
+  const [activePlanId, setActivePlanId] = useState<PlanID>(DEFAULT_PLAN_ID);
 
   const knnCacheRef = useRef<ReturnType<typeof buildKnnCache>>(null);
   const prevRef = useRef<{ x: number; y: number } | null>(null);
 
   const { beacons, isScanning, scanError, start, stop, clear } = useBeaconRanger(uuid);
 
-  const refreshKnnCache = useCallback(async () => {
+  const refreshKnnCache = useCallback(async (planId: PlanID = activePlanId) => {
     const dataset = await loadDataset();
-    const cache = buildKnnCache(dataset, PLAN_ID);
+    const cache = buildKnnCache(dataset, planId);
     knnCacheRef.current = cache;
     return cache;
-  }, []);
+  }, [activePlanId]);
 
   // Keep a ref so the inference-loop closure always reads the latest beacons.
   const latestBeaconsRef = useRef(beacons);
@@ -86,10 +89,10 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     void refreshKnnCache();
   }, [datasetVersion, refreshKnnCache]);
 
-  // Register plan name with the positioning adapter once on mount.
+  // Keep adapter plan name in sync with the active plan used for live/manual state.
   useEffect(() => {
-    void setPlanName(PLAN_ID);
-  }, []);
+    void setPlanName(activePlanId);
+  }, [activePlanId]);
 
   useEffect(() => {
     let active = true;
@@ -105,9 +108,12 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
           x: persisted.x,
           y: persisted.y,
           timestamp: persisted.timestamp,
-          planId: persisted.planId ?? PLAN_ID,
+          planId: persisted.planId ?? DEFAULT_PLAN_ID,
         };
         setPrediction(pos);
+        if (pos.planId === 'ENG4_NORTH' || pos.planId === 'HOME_MAIN') {
+          setActivePlanId(pos.planId);
+        }
         setLiveConfidence(null);
       }
     })();
@@ -132,30 +138,38 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
       if (!next) return;
       const now = Date.now();
       prevRef.current = { x: next.x, y: next.y };
-      const pos: LivePosition = { x: next.x, y: next.y, timestamp: now, planId: PLAN_ID };
+      const pos: LivePosition = { x: next.x, y: next.y, timestamp: now, planId: activePlanId };
       setPrediction(pos);
       setLiveConfidence(next.confidence);
-      void setLivePosition(next.x, next.y, { timestamp: now, planId: PLAN_ID });
+      void setLivePosition(next.x, next.y, { timestamp: now, planId: activePlanId });
     };
 
     tick();
     const interval = setInterval(tick, INFERENCE_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [isLiveRunning]);
+  }, [activePlanId, isLiveRunning]);
 
-  const startBluetooth = useCallback(async () => {
+  const setActivePlan = useCallback((planId: PlanID) => {
+    setActivePlanId(planId);
+    void setPlanName(planId);
+  }, []);
+
+  const startBluetooth = useCallback(async (planId?: PlanID) => {
+    const resolvedPlan = planId ?? activePlanId;
     const granted = await requestBlePermissions();
     if (!granted) throw new Error('BLE permissions not granted');
-    const cache = await refreshKnnCache();
+    const cache = await refreshKnnCache(resolvedPlan);
     if (!cache) throw new Error('No fingerprint dataset available for this floor plan yet');
     clear();
     prevRef.current = null;
     setPrediction(null);
     setLiveConfidence(null);
     await start();
+    setActivePlanId(resolvedPlan);
+    void setPlanName(resolvedPlan);
     setLiveMode('bluetooth');
     setIsLiveRunning(true);
-  }, [start, clear, refreshKnnCache, setLiveMode]);
+  }, [activePlanId, start, clear, refreshKnnCache, setLiveMode]);
 
   const stopBluetooth = useCallback(() => {
     stop();
@@ -180,17 +194,20 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     clear();
   }, [clear]);
 
-  const setManualPosition = useCallback((x: number, y: number) => {
+  const setManualPosition = useCallback((x: number, y: number, planId?: PlanID) => {
+    const resolvedPlan = planId ?? activePlanId;
     stop();
     setLiveMode('manual');
     setIsLiveRunning(false);
+    setActivePlanId(resolvedPlan);
+    void setPlanName(resolvedPlan);
     prevRef.current = null;
     const now = Date.now();
-    const pos: LivePosition = { x, y, timestamp: now, planId: PLAN_ID };
+    const pos: LivePosition = { x, y, timestamp: now, planId: resolvedPlan };
     setPrediction(pos);
     setLiveConfidence(null);
-    void setLivePosition(x, y, { timestamp: now, planId: PLAN_ID, accuracy: 0 });
-  }, [stop, setLiveMode]);
+    void setLivePosition(x, y, { timestamp: now, planId: resolvedPlan, accuracy: 0 });
+  }, [activePlanId, stop, setLiveMode]);
 
   const reloadDataset = useCallback(() => {
     setDatasetVersion((v) => v + 1);
@@ -207,6 +224,8 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     setLiveMode,
     isLiveRunning,
     liveConfidence,
+    activePlanId,
+    setActivePlan,
     startBluetooth,
     stopBluetooth,
     startScanOnly,
@@ -216,7 +235,7 @@ export function PositioningProvider({ children }: { children: React.ReactNode })
     reloadDataset,
   }), [
     beacons, isScanning, scanError, uuid, prediction, liveMode, isLiveRunning, liveConfidence,
-    setLiveMode, startBluetooth, stopBluetooth, startScanOnly, stopScan, clearBeacons, setManualPosition, reloadDataset,
+    activePlanId, setActivePlan, setLiveMode, startBluetooth, stopBluetooth, startScanOnly, stopScan, clearBeacons, setManualPosition, reloadDataset,
   ]);
 
   return (

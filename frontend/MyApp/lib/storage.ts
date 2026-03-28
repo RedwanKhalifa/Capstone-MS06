@@ -44,6 +44,11 @@ export type RoutingGraph = {
   edges: Record<string, RoutingEdge[]>;
 };
 
+type RoutingGraphSnapshot = {
+  version: number;
+  graph: RoutingGraph;
+};
+
 type PositioningModeSnapshot = {
   mode: PositioningMode;
 };
@@ -117,16 +122,45 @@ export const loadPositioningMode = async (): Promise<PositioningMode> => {
 export const savePositioningMode = (mode: PositioningMode) =>
   writeJson(POSITIONING_MODE_FILE, { mode });
 
-export const loadRoutingGraph = async (fallback: RoutingGraph): Promise<RoutingGraph> => {
-  const graph = await readJson<RoutingGraph | null>(ROUTING_GRAPH_FILE, null);
-  if (!graph || !Array.isArray(graph.nodes) || typeof graph.edges !== 'object' || graph.edges == null) {
-    return fallback;
-  }
-  return graph;
+const isRoutingGraph = (value: unknown): value is RoutingGraph => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as RoutingGraph;
+  return Array.isArray(candidate.nodes) && typeof candidate.edges === 'object' && candidate.edges != null;
 };
 
-export const saveRoutingGraph = (graph: RoutingGraph) =>
-  writeJson(ROUTING_GRAPH_FILE, graph);
+const isRoutingGraphSnapshot = (value: unknown): value is RoutingGraphSnapshot => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as RoutingGraphSnapshot;
+  return typeof candidate.version === 'number' && isRoutingGraph(candidate.graph);
+};
+
+export const loadRoutingGraph = async (
+  fallback: RoutingGraph,
+  minimumVersion = 0
+): Promise<RoutingGraph> => {
+  const stored = await readJson<RoutingGraphSnapshot | RoutingGraph | null>(ROUTING_GRAPH_FILE, null);
+
+  if (isRoutingGraphSnapshot(stored)) {
+    if (stored.version < minimumVersion) {
+      await writeJson(ROUTING_GRAPH_FILE, { version: minimumVersion, graph: fallback });
+      return fallback;
+    }
+    return stored.graph;
+  }
+
+  if (isRoutingGraph(stored)) {
+    if (minimumVersion > 0) {
+      await writeJson(ROUTING_GRAPH_FILE, { version: minimumVersion, graph: fallback });
+      return fallback;
+    }
+    return stored;
+  }
+
+  return fallback;
+};
+
+export const saveRoutingGraph = (graph: RoutingGraph, version = 0) =>
+  writeJson(ROUTING_GRAPH_FILE, { version, graph });
 
 export const loadFingerprintSets = async (): Promise<FingerprintSet[]> => {
   const sets = await readJson<FingerprintSet[] | null>(FINGERPRINT_SETS_FILE, null);

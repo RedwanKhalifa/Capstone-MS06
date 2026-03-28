@@ -2,8 +2,8 @@ import { useRouter } from "expo-router";
 import React, { useMemo, useState } from "react";
 import {
     Image,
-    ImageBackground,
     Linking,
+    Platform,
     Pressable,
     ScrollView,
     StyleSheet,
@@ -11,24 +11,123 @@ import {
     TextInput,
     View,
 } from "react-native";
+import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
+import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
+import { TMU_CAMPUS_OVERLAYS } from "../../constants/tmu-campus-overlays";
 import { useAppState } from "../../context/app-state";
-
-const MAP_IMAGE = require("../../assets/images/CampusMapEng1stFloor.png");
 
 const BUILDING_RESULTS = TMU_BUILDINGS.map((building) => `${building.code} - ${building.name}`);
 const SEARCH_SUGGESTIONS = ["ENG", ...ENG_ROOMS];
+const TMU_REGION = {
+  latitude: 43.6577,
+  longitude: -79.3788,
+  latitudeDelta: 0.0038,
+  longitudeDelta: 0.0038,
+};
+const TMU_CAMERA = {
+  center: {
+    latitude: 43.6577,
+    longitude: -79.3788,
+  },
+  pitch: 0,
+  heading: 0,
+  zoom: 16.9,
+  altitude: 1200,
+};
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { saved, accessibility, setAllAccessibility } = useAppState();
+  const { saved, setAllAccessibility } = useAppState();
+  const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) < 31;
   const [searchQuery, setSearchQuery] = useState("");
   const [recents, setRecents] = useState<string[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<BuildingEntry | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+
+  const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
+
+  const legacyAndroidMapHtml = useMemo(() => {
+    const centerLat = 43.6577;
+    const centerLon = -79.3788;
+    const overlays = showCampusOverlays
+      ? TMU_CAMPUS_OVERLAYS.map((overlay) => ({
+          code: overlay.code,
+          label: overlay.label,
+          labelCoordinate: {
+            latitude: overlay.labelCoordinate.latitude,
+            longitude: overlay.labelCoordinate.longitude,
+          },
+          polygon: overlay.polygon.map((point) => ({
+            latitude: point.latitude,
+            longitude: point.longitude,
+          })),
+        }))
+      : [];
+    const overlaysJson = JSON.stringify(overlays);
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+      body { background: #e8edf2; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+      const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([${centerLat}, ${centerLon}], 17);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      const overlays = ${overlaysJson};
+      const postOverlay = (code) => {
+        if (!window.ReactNativeWebView) return;
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'overlay', code }));
+      };
+
+      overlays.forEach((overlay) => {
+        const polygonPoints = overlay.polygon.map((point) => [point.latitude, point.longitude]);
+        const poly = L.polygon(polygonPoints, {
+          color: '#2c61a8',
+          fillColor: '#2d62aa',
+          fillOpacity: 0.30,
+          weight: 2,
+        }).addTo(map);
+
+        poly.on('click', () => postOverlay(overlay.code));
+
+        const labelIcon = L.divIcon({
+          className: 'overlay-label-icon',
+          html: '<span style="background:rgba(6,12,20,0.84);color:#fff;font-weight:800;font-size:11px;letter-spacing:0.3px;padding:2px 6px;border-radius:8px;">' + overlay.label + '</span>',
+        });
+
+        const marker = L.marker([overlay.labelCoordinate.latitude, overlay.labelCoordinate.longitude], {
+          icon: labelIcon,
+          keyboard: false,
+        }).addTo(map);
+
+        marker.on('click', () => postOverlay(overlay.code));
+      });
+    </script>
+  </body>
+</html>`;
+  }, [showCampusOverlays]);
 
   const filteredResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -64,6 +163,30 @@ export default function HomeScreen() {
   const isStarred = (value: string) => saved.starred.includes(value);
   const isWanted = (value: string) => saved.wantToGo.includes(value);
 
+  const handleOverlayPress = (code: string) => {
+    const building = TMU_BUILDINGS.find((entry) => entry.code === code) ?? null;
+    if (!building) {
+      return;
+    }
+    setSelectedBuilding(building);
+    setSelectedRoom(null);
+    setRecents((current) => {
+      const next = [`${building.code} - ${building.name}`, ...current.filter((item) => !item.startsWith(`${building.code} - `))];
+      return next.slice(0, 5);
+    });
+  };
+
+  const handleLegacyAndroidMapMessage = (event: WebViewMessageEvent) => {
+    try {
+      const payload = JSON.parse(event.nativeEvent.data) as { type?: string; code?: string };
+      if (payload.type === "overlay" && payload.code) {
+        handleOverlayPress(payload.code);
+      }
+    } catch {
+      // Ignore malformed map events from webview content.
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -75,8 +198,61 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      <ImageBackground source={MAP_IMAGE} style={styles.map}>
-        <View style={styles.searchBar}>
+      <View style={styles.map}>
+        {isLegacyAndroid ? (
+          <WebView
+            style={styles.mapView}
+            source={{ html: legacyAndroidMapHtml }}
+            originWhitelist={["*"]}
+            javaScriptEnabled
+            domStorageEnabled
+            onMessage={handleLegacyAndroidMapMessage}
+          />
+        ) : (
+          <MapView
+            style={styles.mapView}
+            initialRegion={TMU_REGION}
+            initialCamera={TMU_CAMERA}
+            provider={PROVIDER_GOOGLE}
+            showsBuildings
+            showsCompass
+            toolbarEnabled={false}
+            rotateEnabled={false}
+            minZoomLevel={15.8}
+          >
+            {showCampusOverlays &&
+              TMU_CAMPUS_OVERLAYS.map((overlay) => (
+                <Polygon
+                  key={`${overlay.code}-shape`}
+                  coordinates={overlay.polygon}
+                  tappable
+                  strokeColor="#2c61a8"
+                  fillColor="rgba(45, 98, 170, 0.30)"
+                  strokeWidth={2}
+                  onPress={() => handleOverlayPress(overlay.code)}
+                />
+              ))}
+
+            {showCampusOverlays &&
+              TMU_CAMPUS_OVERLAYS.map((overlay) => (
+                <Marker
+                  key={`${overlay.code}-label`}
+                  coordinate={overlay.labelCoordinate}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges
+                  zIndex={1000}
+                  onPress={() => handleOverlayPress(overlay.code)}
+                >
+                  <View style={styles.overlayLabel}>
+                    <Text style={styles.overlayLabelText}>{overlay.label}</Text>
+                  </View>
+                </Marker>
+              ))}
+          </MapView>
+        )}
+
+        <View style={styles.mapContent}>
+          <View style={styles.searchBar}>
           <IconSymbol name="magnifyingglass" color="#4a4a4a" size={20} />
           <TextInput
             style={styles.searchInput}
@@ -89,94 +265,95 @@ export default function HomeScreen() {
           <Pressable>
             <IconSymbol name="microphone" color="#4a4a4a" size={20} />
           </Pressable>
-        </View>
+          </View>
 
-        <Pressable style={styles.quickIndoorButton} onPress={() => router.push("/indoor")}>
-          <IconSymbol name="figure.walk" color="#f3d400" size={20} />
-          <Text style={styles.quickIndoorButtonText}>Go to Indoor Navigation</Text>
-        </Pressable>
+          <Pressable style={styles.quickIndoorButton} onPress={() => router.push("/indoor")}>
+            <IconSymbol name="figure.walk" color="#f3d400" size={20} />
+            <Text style={styles.quickIndoorButtonText}>Go to Indoor Navigation</Text>
+          </Pressable>
 
-        {!!selectedBuilding && (
-          <View style={styles.detailCard}>
-            <Pressable onPress={() => setSelectedBuilding(null)}>
-              <Text style={styles.backText}>Back</Text>
-            </Pressable>
-            <View style={styles.detailHeader}>
-              <View style={styles.detailTitleRow}>
-                <View style={styles.marker} />
-                <Text style={styles.detailTitle}>
-                  {selectedRoom ?? selectedBuilding.code}
-                </Text>
-              </View>
-              {isStarred(selectedRoom ?? selectedBuilding.code) && (
-                <IconSymbol name="star.fill" color="#2c3ea3" size={22} />
-              )}
-            </View>
-            <Text style={styles.detailSubtitle}>{selectedBuilding.name}</Text>
-            <Image source={{ uri: selectedBuilding.image }} style={styles.detailImage} />
-            <View style={styles.detailButtons}>
-              <Pressable
-                style={styles.detailButton}
-                onPress={() => Linking.openURL("https://www.google.com/maps/search/" + selectedBuilding.name)}
-              >
-                <Text style={styles.detailButtonText}>Outdoor</Text>
+          {!!selectedBuilding && (
+            <View style={styles.detailCard}>
+              <Pressable onPress={() => setSelectedBuilding(null)}>
+                <Text style={styles.backText}>Back</Text>
               </Pressable>
-              {selectedRoom && (
+              <View style={styles.detailHeader}>
+                <View style={styles.detailTitleRow}>
+                  <View style={styles.marker} />
+                  <Text style={styles.detailTitle}>
+                    {selectedRoom ?? selectedBuilding.code}
+                  </Text>
+                </View>
+                {isStarred(selectedRoom ?? selectedBuilding.code) && (
+                  <IconSymbol name="star.fill" color="#2c3ea3" size={22} />
+                )}
+              </View>
+              <Text style={styles.detailSubtitle}>{selectedBuilding.name}</Text>
+              <Image source={{ uri: selectedBuilding.image }} style={styles.detailImage} />
+              <View style={styles.detailButtons}>
                 <Pressable
-                  style={styles.detailButtonSecondary}
-                  onPress={() => router.push({ pathname: "/indoor", params: { destination: selectedRoom } })}
+                  style={styles.detailButton}
+                  onPress={() => Linking.openURL("https://www.google.com/maps/search/" + selectedBuilding.name)}
                 >
-                  <Text style={styles.detailButtonText}>Indoor</Text>
+                  <Text style={styles.detailButtonText}>Outdoor</Text>
                 </Pressable>
-              )}
-            </View>
-            <Text style={styles.detailDescription}>{selectedBuilding.description}</Text>
-            <Text style={styles.detailSection}>Accessibility</Text>
-            <Text style={styles.detailDescription}>{selectedBuilding.accessibility}</Text>
-          </View>
-        )}
-
-        {!selectedBuilding && filteredResults.length > 0 && (
-          <View style={styles.resultsCard}>
-            <Text style={styles.resultsTitle}>{searchQuery ? "Results" : "Recent"}</Text>
-            <ScrollView style={styles.resultsList}>
-              {filteredResults.map((item, index) => {
-                const displayKey = item.includes(" - ") ? item.split(" - ")[0] : item;
-                return (
+                {selectedRoom && (
                   <Pressable
-                    key={`${item}-${index}`}
-                    style={styles.resultItem}
-                    onPress={() => handleSelectSearch(item)}
+                    style={styles.detailButtonSecondary}
+                    onPress={() => router.push({ pathname: "/indoor", params: { destination: selectedRoom } })}
                   >
-                    <View style={styles.resultTitleRow}>
-                      <View style={styles.markerSmall} />
-                      <Text style={styles.resultTitle}>{displayKey}</Text>
-                      <View style={styles.resultIcons}>
-                        {isStarred(displayKey) && (
-                          <IconSymbol name="star.fill" color="#2c3ea3" size={18} />
-                        )}
-                        {isFavorite(displayKey) && (
-                          <IconSymbol name="heart.fill" color="#2c3ea3" size={18} />
-                        )}
-                        {isWanted(displayKey) && (
-                          <IconSymbol name="flag.fill" color="#2c3ea3" size={18} />
-                        )}
-                      </View>
-                    </View>
-                    {item.includes(" - ") && (
-                      <Text style={styles.resultSubtitle}>{item.split(" - ")[1]}</Text>
-                    )}
+                    <Text style={styles.detailButtonText}>Indoor</Text>
                   </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        )}
+                )}
+              </View>
+              <Text style={styles.detailDescription}>{selectedBuilding.description}</Text>
+              <Text style={styles.detailSection}>Accessibility</Text>
+              <Text style={styles.detailDescription}>{selectedBuilding.accessibility}</Text>
+            </View>
+          )}
+
+          {!selectedBuilding && filteredResults.length > 0 && (
+            <View style={styles.resultsCard}>
+              <Text style={styles.resultsTitle}>{searchQuery ? "Results" : "Recent"}</Text>
+              <ScrollView style={styles.resultsList}>
+                {filteredResults.map((item, index) => {
+                  const displayKey = item.includes(" - ") ? item.split(" - ")[0] : item;
+                  return (
+                    <Pressable
+                      key={`${item}-${index}`}
+                      style={styles.resultItem}
+                      onPress={() => handleSelectSearch(item)}
+                    >
+                      <View style={styles.resultTitleRow}>
+                        <View style={styles.markerSmall} />
+                        <Text style={styles.resultTitle}>{displayKey}</Text>
+                        <View style={styles.resultIcons}>
+                          {isStarred(displayKey) && (
+                            <IconSymbol name="star.fill" color="#2c3ea3" size={18} />
+                          )}
+                          {isFavorite(displayKey) && (
+                            <IconSymbol name="heart.fill" color="#2c3ea3" size={18} />
+                          )}
+                          {isWanted(displayKey) && (
+                            <IconSymbol name="flag.fill" color="#2c3ea3" size={18} />
+                          )}
+                        </View>
+                      </View>
+                      {item.includes(" - ") && (
+                        <Text style={styles.resultSubtitle}>{item.split(" - ")[1]}</Text>
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+        </View>
 
         <Pressable style={styles.accessibilityButton} onPress={() => setAllAccessibility(true)}>
           <IconSymbol name="person.circle" color="#1c2b85" size={26} />
         </Pressable>
-      </ImageBackground>
+      </View>
 
       <View style={[styles.sheet, sheetOpen && styles.sheetOpen]}>
         <Pressable style={styles.sheetHandle} onPress={() => setSheetOpen((open) => !open)}>
@@ -229,8 +406,27 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+    position: "relative",
+  },
+  mapView: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  mapContent: {
+    flex: 1,
     paddingHorizontal: 16,
     paddingTop: 12,
+  },
+  overlayLabel: {
+    backgroundColor: "rgba(6, 12, 20, 0.84)",
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  overlayLabelText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
   },
   searchBar: {
     flexDirection: "row",

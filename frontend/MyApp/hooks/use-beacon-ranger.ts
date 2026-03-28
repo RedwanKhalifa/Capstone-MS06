@@ -2,22 +2,18 @@ import { Buffer } from 'buffer';
 import Constants from 'expo-constants';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
-import type { Device } from 'react-native-ble-plx';
 
 import { BEACON_UUID_DEFAULT, type BeaconReading } from '@/types/fingerprint';
 
-const IBEACON_PREFIX = '4c000215';
-// Android scan callbacks can be bursty; keep beacons visible longer before pruning.
-const OFFLINE_TIMEOUT_MS = 12000;
-const LAST_SEEN_HEARTBEAT_MS = 500;
-
-const toHex = (value: string) => Buffer.from(value, 'base64').toString('hex').toLowerCase();
-const normalizeUuid = (value: string) => value.trim().toLowerCase();
+type Device = {
+  manufacturerData: string | null;
+  rssi: number | null;
+};
 
 type BleManagerType = {
   startDeviceScan: (
     uuids: string[] | null,
-    options: { allowDuplicates?: boolean } | null,
+    options: Record<string, unknown> | null,
     callback: (error: { message?: string } | null, device: Device | null) => void
   ) => void;
   stopDeviceScan: () => void;
@@ -25,18 +21,27 @@ type BleManagerType = {
 
 type BleManagerCtor = new () => BleManagerType;
 
+const IBEACON_PREFIX = '4c000215';
+// Android scan callbacks can be bursty; keep beacons visible longer before pruning.
+const OFFLINE_TIMEOUT_MS = 12000;
+const LAST_SEEN_HEARTBEAT_MS = 500;
+
 let BleManagerClass: BleManagerCtor | null | undefined;
 
-function loadBleManagerClass() {
+const toHex = (value: string) => Buffer.from(value, 'base64').toString('hex').toLowerCase();
+const normalizeUuid = (value: string) => value.trim().toLowerCase();
+
+function loadBleManagerClass(): BleManagerCtor | null {
   if (Platform.OS === 'web') return null;
   if (Constants.appOwnership === 'expo') return null;
-  if (BleManagerClass !== undefined) return BleManagerClass;
 
-  try {
-    const blePlx = require('react-native-ble-plx') as { BleManager?: BleManagerCtor };
-    BleManagerClass = blePlx.BleManager ?? null;
-  } catch {
-    BleManagerClass = null;
+  if (BleManagerClass === undefined) {
+    try {
+      const blePlx = require('react-native-ble-plx') as { BleManager?: BleManagerCtor };
+      BleManagerClass = blePlx.BleManager ?? null;
+    } catch {
+      BleManagerClass = null;
+    }
   }
 
   return BleManagerClass;

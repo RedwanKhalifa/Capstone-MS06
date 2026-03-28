@@ -116,10 +116,11 @@ export function useBleScanner(): UseBleScannerResult {
             }
 
             if (!device || typeof device.rssi !== "number") return;
+            const nextRssi = device.rssi;
 
             setBeaconData((prev) => {
               const clean = prev.filter((b) => b.mac !== device.id);
-              return [...clean, { mac: device.id, rssi: device.rssi }];
+              return [...clean, { mac: device.id, rssi: nextRssi }];
             });
           });
 
