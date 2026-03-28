@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+<<<<<<< HEAD
   Image,
   Keyboard,
   Linking,
@@ -13,10 +14,24 @@ import {
   View,
 } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
+=======
+    Image,
+    Linking,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
+} from "react-native";
+import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
+import { WebView, type WebViewMessageEvent } from "react-native-webview";
+>>>>>>> ba8cb1ad18aa9e0bff09ef8b39e547f4e578c59a
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
-import { TMU_CAMPUS_OVERLAYS } from "../../constants/tmu-campus-overlays";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
+import { TMU_CAMPUS_OVERLAYS } from "../../constants/tmu-campus-overlays";
 import { useAppState } from "../../context/app-state";
 
 const BUILDING_RESULTS = TMU_BUILDINGS.map((building) => `${building.code} - ${building.name}`);
@@ -51,6 +66,7 @@ type SearchResultItem = {
 export default function HomeScreen() {
   const router = useRouter();
   const { saved, setAllAccessibility } = useAppState();
+  const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) < 31;
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
@@ -62,6 +78,7 @@ export default function HomeScreen() {
   const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) <= 29;
   const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
 
+<<<<<<< HEAD
   useEffect(() => {
     if (!showCampusOverlays) {
       return;
@@ -73,6 +90,90 @@ export default function HomeScreen() {
   }, [showCampusOverlays]);
 
   const filteredResults = useMemo<SearchResultItem[]>(() => {
+=======
+  const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
+
+  const legacyAndroidMapHtml = useMemo(() => {
+    const centerLat = 43.6577;
+    const centerLon = -79.3788;
+    const overlays = showCampusOverlays
+      ? TMU_CAMPUS_OVERLAYS.map((overlay) => ({
+          code: overlay.code,
+          label: overlay.label,
+          labelCoordinate: {
+            latitude: overlay.labelCoordinate.latitude,
+            longitude: overlay.labelCoordinate.longitude,
+          },
+          polygon: overlay.polygon.map((point) => ({
+            latitude: point.latitude,
+            longitude: point.longitude,
+          })),
+        }))
+      : [];
+    const overlaysJson = JSON.stringify(overlays);
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+      body { background: #e8edf2; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script>
+      const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([${centerLat}, ${centerLon}], 17);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      const overlays = ${overlaysJson};
+      const postOverlay = (code) => {
+        if (!window.ReactNativeWebView) return;
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'overlay', code }));
+      };
+
+      overlays.forEach((overlay) => {
+        const polygonPoints = overlay.polygon.map((point) => [point.latitude, point.longitude]);
+        const poly = L.polygon(polygonPoints, {
+          color: '#2c61a8',
+          fillColor: '#2d62aa',
+          fillOpacity: 0.30,
+          weight: 2,
+        }).addTo(map);
+
+        poly.on('click', () => postOverlay(overlay.code));
+
+        const labelIcon = L.divIcon({
+          className: 'overlay-label-icon',
+          html: '<span style="background:rgba(6,12,20,0.84);color:#fff;font-weight:800;font-size:11px;letter-spacing:0.3px;padding:2px 6px;border-radius:8px;">' + overlay.label + '</span>',
+        });
+
+        const marker = L.marker([overlay.labelCoordinate.latitude, overlay.labelCoordinate.longitude], {
+          icon: labelIcon,
+          keyboard: false,
+        }).addTo(map);
+
+        marker.on('click', () => postOverlay(overlay.code));
+      });
+    </script>
+  </body>
+</html>`;
+  }, [showCampusOverlays]);
+
+  const filteredResults = useMemo(() => {
+>>>>>>> ba8cb1ad18aa9e0bff09ef8b39e547f4e578c59a
     const query = searchQuery.trim().toLowerCase();
     if (!query) {
       return recents.map((item, index) => {
@@ -156,6 +257,7 @@ export default function HomeScreen() {
   const isFavorite = (value: string) => saved.favorites.includes(value);
   const isStarred = (value: string) => saved.starred.includes(value);
   const isWanted = (value: string) => saved.wantToGo.includes(value);
+<<<<<<< HEAD
   const buildFallbackEntry = (code: string): BuildingEntry => ({
     code,
     name: code,
@@ -163,6 +265,8 @@ export default function HomeScreen() {
     accessibility: "Accessibility information will be updated soon.",
     image: FALLBACK_BUILDING_IMAGE,
   });
+=======
+>>>>>>> ba8cb1ad18aa9e0bff09ef8b39e547f4e578c59a
 
   const handleOverlayPress = (code: string) => {
     Keyboard.dismiss();
@@ -177,6 +281,17 @@ export default function HomeScreen() {
     setSearchActive(false);
   };
 
+  const handleLegacyAndroidMapMessage = (event: WebViewMessageEvent) => {
+    try {
+      const payload = JSON.parse(event.nativeEvent.data) as { type?: string; code?: string };
+      if (payload.type === "overlay" && payload.code) {
+        handleOverlayPress(payload.code);
+      }
+    } catch {
+      // Ignore malformed map events from webview content.
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -189,6 +304,7 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.map}>
+<<<<<<< HEAD
         <MapView
           style={styles.mapView}
           initialRegion={TMU_REGION}
@@ -230,6 +346,59 @@ export default function HomeScreen() {
               </Marker>
             ))}
         </MapView>
+=======
+        {isLegacyAndroid ? (
+          <WebView
+            style={styles.mapView}
+            source={{ html: legacyAndroidMapHtml }}
+            originWhitelist={["*"]}
+            javaScriptEnabled
+            domStorageEnabled
+            onMessage={handleLegacyAndroidMapMessage}
+          />
+        ) : (
+          <MapView
+            style={styles.mapView}
+            initialRegion={TMU_REGION}
+            initialCamera={TMU_CAMERA}
+            provider={PROVIDER_GOOGLE}
+            showsBuildings
+            showsCompass
+            toolbarEnabled={false}
+            rotateEnabled={false}
+            minZoomLevel={15.8}
+          >
+            {showCampusOverlays &&
+              TMU_CAMPUS_OVERLAYS.map((overlay) => (
+                <Polygon
+                  key={`${overlay.code}-shape`}
+                  coordinates={overlay.polygon}
+                  tappable
+                  strokeColor="#2c61a8"
+                  fillColor="rgba(45, 98, 170, 0.30)"
+                  strokeWidth={2}
+                  onPress={() => handleOverlayPress(overlay.code)}
+                />
+              ))}
+
+            {showCampusOverlays &&
+              TMU_CAMPUS_OVERLAYS.map((overlay) => (
+                <Marker
+                  key={`${overlay.code}-label`}
+                  coordinate={overlay.labelCoordinate}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges
+                  zIndex={1000}
+                  onPress={() => handleOverlayPress(overlay.code)}
+                >
+                  <View style={styles.overlayLabel}>
+                    <Text style={styles.overlayLabelText}>{overlay.label}</Text>
+                  </View>
+                </Marker>
+              ))}
+          </MapView>
+        )}
+>>>>>>> ba8cb1ad18aa9e0bff09ef8b39e547f4e578c59a
 
         <View style={styles.mapContent}>
           <View style={styles.searchBar}>
