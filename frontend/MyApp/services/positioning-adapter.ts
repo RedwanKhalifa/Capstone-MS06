@@ -10,7 +10,11 @@ export type LivePosition = {
 	planId?: string;
 };
 export type PositioningPoint = { id: string; name: string; x: number; y: number };
-type PositioningState = { lastKnownPosition: LivePosition; points: PositioningPoint[]; planName: string };
+type PositioningState = {
+	lastKnownPosition: LivePosition;
+	points: PositioningPoint[];
+	planName: string;
+};
 const FILE_URI = `${FileSystem.documentDirectory}positioning-state.json`;
 const DEFAULT_STATE: PositioningState = {
 	lastKnownPosition: { x: 0.82, y: 0.42, timestamp: Date.now(), planId: "ENG4_NORTH" },

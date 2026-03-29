@@ -6,6 +6,7 @@ import {
     type RoutingNode as GraphNode,
     type RoutingGraph,
 } from "@/lib/storage";
+import { DEFAULT_ROUTING_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION } from "@/lib/default-routing-graph";
 import { Image as ExpoImage } from "expo-image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -15,6 +16,7 @@ import {
     Easing,
     PixelRatio,
     Image as RNImage,
+    Share,
     ScrollView,
     StyleSheet,
     Text,
@@ -51,8 +53,6 @@ const SIM_DOT_BASE_RADIUS = 12;
 const TEMP_START_NODE_ID = "__TEMP_START__";
 const SIM_LOOP_PAUSE_MS = 500;
 const DESTINATION_REACHED_THRESHOLD_PX = 9;
-const ROUTING_GRAPH_VERSION = 3;
-
 const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", Record<string, string>> = {
   ENG4_NORTH: {
     ENG103: "N12",
@@ -73,108 +73,7 @@ const PLAN_IMAGES: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOU
   HOME_MAIN: require("../../assets/images/HomeFloorPlan-1.png"),
 };
 
-const DEFAULT_NODES: GraphNode[] = [
-  { id: "3N1", x: 455, y: 180, floor: 3 },
-  { id: "3N2", x: 730, y: 180, floor: 3 },
-  { id: "3N3", x: 730, y: 275, floor: 3 },
-  { id: "3N4", x: 710, y: 300, floor: 3 },
-  { id: "3N5", x: 450, y: 270, floor: 3 },
-  { id: "3N6", x: 455, y: 410, floor: 3 },
-  { id: "3N7", x: 730, y: 300, floor: 3 },
-  { id: "3N8", x: 730, y: 410, floor: 3 },
-  { id: "N1", x: 664, y: 295, floor: 4 },
-  { id: "N2", x: 664, y: 195, floor: 4 },
-  { id: "N3", x: 444, y: 187, floor: 4 },
-  { id: "N4", x: 352, y: 195, floor: 4 },
-  { id: "N5", x: 352, y: 217, floor: 4 },
-  { id: "N6", x: 425, y: 217, floor: 4 },
-  { id: "N7", x: 425, y: 260, floor: 4 },
-  { id: "N8", x: 352, y: 260, floor: 4 },
-  { id: "N9", x: 443, y: 260, floor: 4 },
-  { id: "N11", x: 444, y: 385, floor: 4 },
-  { id: "N12", x: 663, y: 385, floor: 4 },
-  { id: "N13", x: 482, y: 195, floor: 4 },
-  { id: "N14", x: 555, y: 195, floor: 4 },
-  { id: "N15", x: 628, y: 195, floor: 4 },
-  { id: "N16", x: 443, y: 299, floor: 4 },
-  { id: "N17", x: 443, y: 344, floor: 4 },
-  { id: "N18", x: 473, y: 385, floor: 4 },
-  { id: "N19", x: 530, y: 385, floor: 4 },
-  { id: "N20", x: 579, y: 385, floor: 4 },
-  { id: "N21", x: 626, y: 385, floor: 4 },
-  { id: "N22", x: 663, y: 341, floor: 4 },
-  { id: "N23", x: 390, y: 260, floor: 4 },
-  { id: "N24", x: 389, y: 217, floor: 4 },
-  { id: "N25", x: 425, y: 238, floor: 4 },
-  { id: "N26", x: 352, y: 237, floor: 4 },
-  { id: "N27", x: 401, y: 195, floor: 4 },
-  { id: "N28", x: 523, y: 195, floor: 4 },
-  { id: "N29", x: 588, y: 195, floor: 4 },
-  { id: "N30", x: 465, y: 385, floor: 4 },
-  { id: "N31", x: 463, y: 297, floor: 4 },
-  { id: "N32", x: 646, y: 295, floor: 4 },
-  { id: "N33", x: 444, y: 369, floor: 4 },
-  { id: "H1", x: 357, y: 483, floor: 40 },
-  { id: "H2", x: 407, y: 483, floor: 40 },
-  { id: "H3", x: 409, y: 375, floor: 40 },
-  { id: "H4", x: 355, y: 375, floor: 40 },
-  { id: "H5", x: 411, y: 263, floor: 40 },
-  { id: "H6", x: 409, y: 151, floor: 40 },
-];
-
-const DEFAULT_EDGES: Record<string, Edge[]> = {
-  "3N1": [{ target: "3N2", weight: 275 }, { target: "3N5", weight: 90 }],
-  "3N2": [{ target: "3N1", weight: 275 }, { target: "3N3", weight: 95 }],
-  "3N3": [{ target: "3N2", weight: 95 }, { target: "3N4", weight: 32 }, { target: "3N7", weight: 25 }],
-  "3N4": [{ target: "3N3", weight: 32 }, { target: "3N7", weight: 20 }],
-  "3N5": [{ target: "3N6", weight: 140 }, { target: "3N1", weight: 90 }],
-  "3N6": [{ target: "3N5", weight: 140 }, { target: "3N8", weight: 275 }],
-  "3N7": [{ target: "3N4", weight: 20 }, { target: "3N8", weight: 110 }, { target: "3N3", weight: 25 }],
-  "3N8": [{ target: "3N7", weight: 110 }, { target: "3N6", weight: 275 }],
-  N1: [{ target: "N2", weight: 100 }, { target: "N22", weight: 46 }, { target: "N32", weight: 18 }],
-  N2: [{ target: "N1", weight: 100 }, { target: "N15", weight: 36 }],
-  N3: [{ target: "N9", weight: 73 }, { target: "N13", weight: 39 }, { target: "N27", weight: 44 }],
-  N4: [{ target: "N5", weight: 22 }, { target: "N27", weight: 49 }],
-  N5: [{ target: "N4", weight: 22 }, { target: "N24", weight: 37 }, { target: "N26", weight: 20 }],
-  N6: [{ target: "N24", weight: 36 }, { target: "N25", weight: 21 }],
-  N7: [{ target: "N9", weight: 18 }, { target: "N23", weight: 35 }, { target: "N25", weight: 22 }],
-  N8: [{ target: "N23", weight: 38 }, { target: "N26", weight: 23 }],
-  N9: [{ target: "N3", weight: 73 }, { target: "N7", weight: 18 }, { target: "N16", weight: 39 }],
-  N11: [{ target: "N33", weight: 16 }, { target: "N30", weight: 21 }],
-  N12: [{ target: "N21", weight: 37 }, { target: "N22", weight: 44 }],
-  N13: [{ target: "N3", weight: 39 }, { target: "N28", weight: 41 }],
-  N14: [{ target: "N28", weight: 32 }, { target: "N29", weight: 33 }],
-  N15: [{ target: "N2", weight: 36 }, { target: "N29", weight: 40 }],
-  N16: [{ target: "N17", weight: 45 }, { target: "N31", weight: 20 }, { target: "N9", weight: 39 }],
-  N17: [{ target: "N16", weight: 45 }, { target: "N33", weight: 25 }],
-  N18: [{ target: "N19", weight: 57 }, { target: "N30", weight: 8 }],
-  N19: [{ target: "N18", weight: 57 }, { target: "N20", weight: 49 }],
-  N20: [{ target: "N19", weight: 49 }, { target: "N21", weight: 47 }],
-  N21: [{ target: "N12", weight: 37 }, { target: "N20", weight: 47 }],
-  N22: [{ target: "N1", weight: 46 }, { target: "N12", weight: 44 }],
-  N23: [{ target: "N7", weight: 35 }, { target: "N8", weight: 38 }],
-  N24: [{ target: "N5", weight: 37 }, { target: "N6", weight: 36 }],
-  N25: [{ target: "N6", weight: 21 }, { target: "N7", weight: 22 }],
-  N26: [{ target: "N5", weight: 20 }, { target: "N8", weight: 23 }],
-  N27: [{ target: "N3", weight: 44 }, { target: "N4", weight: 49 }],
-  N28: [{ target: "N13", weight: 41 }, { target: "N14", weight: 32 }],
-  N29: [{ target: "N14", weight: 33 }, { target: "N15", weight: 40 }],
-  N30: [{ target: "N18", weight: 8 }, { target: "N31", weight: 88 }, { target: "N11", weight: 21 }],
-  N31: [{ target: "N30", weight: 88 }, { target: "N16", weight: 20 }],
-  N32: [{ target: "N1", weight: 18 }],
-  N33: [{ target: "N11", weight: 16 }, { target: "N17", weight: 25 }],
-  H1: [{ target: "H2", weight: 50 }, { target: "H4", weight: 108 }, { target: "H3", weight: 120 }],
-  H2: [{ target: "H1", weight: 50 }, { target: "H3", weight: 108 }, { target: "H4", weight: 120 }],
-  H3: [{ target: "H2", weight: 108 }, { target: "H4", weight: 54 }, { target: "H1", weight: 120 }, { target: "H5", weight: 112 }],
-  H4: [{ target: "H3", weight: 54 }, { target: "H1", weight: 108 }, { target: "H2", weight: 120 }],
-  H5: [{ target: "H3", weight: 112 }, { target: "H6", weight: 112 }],
-  H6: [{ target: "H5", weight: 112 }],
-};
-
-const DEFAULT_GRAPH: RoutingGraph = {
-  nodes: DEFAULT_NODES,
-  edges: DEFAULT_EDGES,
-};
+const DEFAULT_GRAPH: RoutingGraph = DEFAULT_ROUTING_GRAPH;
 
 function dijkstra(
   nodes: GraphNode[],
@@ -374,7 +273,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const loaded = await loadRoutingGraph(DEFAULT_GRAPH, ROUTING_GRAPH_VERSION);
+      const loaded = await loadRoutingGraph(DEFAULT_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION);
       if (!active) return;
       setGraph({
         nodes: loaded.nodes,
@@ -394,8 +293,32 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
   useEffect(() => {
     if (!graphLoaded) return;
-    void saveRoutingGraph({ ...graph, edges: weightedEdges }, ROUTING_GRAPH_VERSION);
+    void saveRoutingGraph({ ...graph, edges: weightedEdges }, MINIMUM_ROUTING_GRAPH_VERSION);
   }, [graph, weightedEdges, graphLoaded]);
+
+  const shareCurrentFloorGraph = async () => {
+    const floorNodeIds = new Set(
+      graph.nodes.filter((node) => node.floor === activeFloor).map((node) => node.id)
+    );
+    const floorGraph = {
+      version: MINIMUM_ROUTING_GRAPH_VERSION,
+      floor: activeFloor,
+      nodes: graph.nodes.filter((node) => node.floor === activeFloor),
+      edges: Object.fromEntries(
+        Object.entries(weightedEdges)
+          .filter(([fromId]) => floorNodeIds.has(fromId))
+          .map(([fromId, list]) => [
+            fromId,
+            list.filter((edge) => floorNodeIds.has(edge.target)),
+          ])
+      ),
+    };
+
+    await Share.share({
+      message: JSON.stringify(floorGraph, null, 2),
+      title: `Routing Graph Floor ${activeFloor}`,
+    });
+  };
 
   const moveEditingNode = (dx: number, dy: number) => {
     if (!editingNodeId) return;
@@ -1177,6 +1100,9 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 onPress={removeSelectedNode}
                 disabled={!selectedEditNode}>
                 <Text style={styles.editActionDangerText}>Delete Node</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.editActionBtn} onPress={() => void shareCurrentFloorGraph()}>
+                <Text style={styles.editActionText}>Share Graph</Text>
               </TouchableOpacity>
             </View>
 

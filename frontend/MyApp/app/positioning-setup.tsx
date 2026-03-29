@@ -5,6 +5,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { FloorplanCanvas } from '@/components/maps/floorplan-canvas';
 import { usePositioning } from '@/context/positioning';
 import { buildDataset } from '@/lib/csv';
+import { DEFAULT_ROUTING_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION } from '@/lib/default-routing-graph';
 import { requestBlePermissions } from '@/lib/permissions';
 import {
     deleteFingerprintSet,
@@ -16,7 +17,6 @@ import {
     saveFingerprintSet,
     savePositioningProject,
     type FingerprintSet,
-    type RoutingGraph,
 } from '@/lib/storage';
 import { FLOOR_PLANS, type AnchorPoint, type FingerprintCsvRow, type PlanID, type TrainingDataset } from '@/types/fingerprint';
 
@@ -392,8 +392,7 @@ export default function PositioningSetupScreen() {
   };
 
   const importRoutingNodes = async () => {
-    const emptyGraph: RoutingGraph = { nodes: [], edges: {} };
-    const graph = await loadRoutingGraph(emptyGraph);
+    const graph = await loadRoutingGraph(DEFAULT_ROUTING_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION);
     const routingFloor = PLAN_ROUTING_FLOOR[selectedPlanID];
     const routingNodes = graph.nodes.filter((node) => node.floor === routingFloor);
 
@@ -432,8 +431,7 @@ export default function PositioningSetupScreen() {
   };
 
   const syncRoutingNodes = async () => {
-    const emptyGraph: RoutingGraph = { nodes: [], edges: {} };
-    const graph = await loadRoutingGraph(emptyGraph);
+    const graph = await loadRoutingGraph(DEFAULT_ROUTING_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION);
     const routingFloor = PLAN_ROUTING_FLOOR[selectedPlanID];
     const nodeNameRe = planRoutingNodeNameRe(selectedPlanID);
     const routingNodes = graph.nodes.filter((node) => node.floor === routingFloor);
