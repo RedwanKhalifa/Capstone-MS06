@@ -1,18 +1,19 @@
 import { useRouter } from "expo-router";
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  Image,
-  Keyboard,
-  Linking,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Image,
+    Keyboard,
+    Linking,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
+import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
 import { IconSymbol } from "../../components/ui/icon-symbol";
 import { ENG_ROOMS, TMU_BUILDINGS, type BuildingEntry } from "../../constants/tmu-buildings";
@@ -60,6 +61,98 @@ export default function HomeScreen() {
   const engBuilding = TMU_BUILDINGS.find((entry) => entry.code === "ENG") ?? null;
   const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) <= 29;
   const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
+
+  const legacyAndroidMapHtml = useMemo(() => {
+    const overlays = showCampusOverlays
+      ? TMU_CAMPUS_OVERLAYS.map((overlay) => ({
+          code: overlay.code,
+          label: overlay.label,
+          labelCoordinate: {
+            latitude: overlay.labelCoordinate.latitude,
+            longitude: overlay.labelCoordinate.longitude,
+          },
+          polygon: overlay.polygon.map((point) => ({
+            latitude: point.latitude,
+            longitude: point.longitude,
+          })),
+        }))
+      : [];
+
+    return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+      body { background: #e8edf2; }
+      .overlay-label {
+        background: rgba(6, 12, 20, 0.84);
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        border-radius: 8px;
+        padding: 2px 6px;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const overlays = ${JSON.stringify(overlays)};
+      const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([43.6577, -79.3788], 17);
+
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      overlays.forEach((overlay) => {
+        const polygon = L.polygon(
+          overlay.polygon.map((point) => [point.latitude, point.longitude]),
+          {
+            color: '#2c61a8',
+            weight: 2,
+            fillColor: '#2d62aa',
+            fillOpacity: 0.3,
+          }
+        ).addTo(map);
+
+        polygon.on('click', () => {
+          window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'overlay', code: overlay.code }));
+        });
+
+        const labelIcon = L.divIcon({
+          className: 'overlay-label-wrap',
+          html: '<div class="overlay-label">' + overlay.label + '</div>',
+        });
+
+        const marker = L.marker(
+          [overlay.labelCoordinate.latitude, overlay.labelCoordinate.longitude],
+          { icon: labelIcon }
+        ).addTo(map);
+
+        marker.on('click', () => {
+          window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'overlay', code: overlay.code }));
+        });
+      });
+    </script>
+  </body>
+</html>`;
+  }, [showCampusOverlays]);
 
   useEffect(() => {
     if (!showCampusOverlays) {
@@ -181,6 +274,17 @@ export default function HomeScreen() {
     setSearchActive(false);
   };
 
+  const handleLegacyAndroidMapMessage = (event: WebViewMessageEvent) => {
+    try {
+      const payload = JSON.parse(event.nativeEvent.data) as { type?: string; code?: string };
+      if (payload.type === "overlay" && payload.code) {
+        handleOverlayPress(payload.code);
+      }
+    } catch {
+      // Ignore malformed map events from embedded content.
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -193,47 +297,59 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.map}>
-        <MapView
-          style={styles.mapView}
-          initialRegion={TMU_REGION}
-          initialCamera={isLegacyAndroid ? undefined : TMU_CAMERA}
-          showsBuildings
-          showsCompass
-          toolbarEnabled={false}
-          rotateEnabled={false}
-          moveOnMarkerPress={false}
-          minZoomLevel={15.8}
-          onPress={dismissSearch}
-        >
-          {showCampusOverlays &&
-            TMU_CAMPUS_OVERLAYS.map((overlay) => (
-              <Polygon
-                key={`${overlay.code}-shape`}
-                coordinates={overlay.polygon}
-                tappable
-                strokeColor="#2c61a8"
-                fillColor="rgba(45, 98, 170, 0.30)"
-                strokeWidth={2}
-                onPress={() => handleOverlayPress(overlay.code)}
-              />
-            ))}
+        {isLegacyAndroid ? (
+          <WebView
+            style={styles.mapView}
+            originWhitelist={["*"]}
+            source={{ html: legacyAndroidMapHtml }}
+            onMessage={handleLegacyAndroidMapMessage}
+            javaScriptEnabled
+            domStorageEnabled
+            onTouchStart={dismissSearch}
+          />
+        ) : (
+          <MapView
+            style={styles.mapView}
+            initialRegion={TMU_REGION}
+            initialCamera={TMU_CAMERA}
+            showsBuildings
+            showsCompass
+            toolbarEnabled={false}
+            rotateEnabled={false}
+            moveOnMarkerPress={false}
+            minZoomLevel={15.8}
+            onPress={dismissSearch}
+          >
+            {showCampusOverlays &&
+              TMU_CAMPUS_OVERLAYS.map((overlay) => (
+                <Polygon
+                  key={`${overlay.code}-shape`}
+                  coordinates={overlay.polygon}
+                  tappable
+                  strokeColor="#2c61a8"
+                  fillColor="rgba(45, 98, 170, 0.30)"
+                  strokeWidth={2}
+                  onPress={() => handleOverlayPress(overlay.code)}
+                />
+              ))}
 
-          {showCampusOverlays &&
-            TMU_CAMPUS_OVERLAYS.map((overlay) => (
-              <Marker
-                key={`${overlay.code}-label`}
-                coordinate={overlay.labelCoordinate}
-                anchor={{ x: 0.5, y: 0.5 }}
-                tracksViewChanges={labelTracksViewChanges}
-                zIndex={1000}
-                onPress={() => handleOverlayPress(overlay.code)}
-              >
-                <View style={styles.overlayLabel}>
-                  <Text style={styles.overlayLabelText}>{overlay.label}</Text>
-                </View>
-              </Marker>
-            ))}
-        </MapView>
+            {showCampusOverlays &&
+              TMU_CAMPUS_OVERLAYS.map((overlay) => (
+                <Marker
+                  key={`${overlay.code}-label`}
+                  coordinate={overlay.labelCoordinate}
+                  anchor={{ x: 0.5, y: 0.5 }}
+                  tracksViewChanges={labelTracksViewChanges}
+                  zIndex={1000}
+                  onPress={() => handleOverlayPress(overlay.code)}
+                >
+                  <View style={styles.overlayLabel}>
+                    <Text style={styles.overlayLabelText}>{overlay.label}</Text>
+                  </View>
+                </Marker>
+              ))}
+          </MapView>
+        )}
 
         <View style={styles.mapContent}>
           <View style={styles.searchBar}>
