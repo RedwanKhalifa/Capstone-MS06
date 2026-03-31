@@ -1,5 +1,6 @@
 import { useAppState } from "@/context/app-state";
 import { usePositioning } from "@/context/positioning";
+import { DEFAULT_ROUTING_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION } from "@/lib/default-routing-graph";
 import {
     loadRoutingGraph,
     saveRoutingGraph,
@@ -7,7 +8,6 @@ import {
     type RoutingNode as GraphNode,
     type RoutingGraph,
 } from "@/lib/storage";
-import { DEFAULT_ROUTING_GRAPH, MINIMUM_ROUTING_GRAPH_VERSION } from "@/lib/default-routing-graph";
 import { Image as ExpoImage } from "expo-image";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -17,8 +17,8 @@ import {
     Easing,
     PixelRatio,
     Image as RNImage,
-    Share,
     ScrollView,
+    Share,
     StyleSheet,
     Text,
     TouchableOpacity,

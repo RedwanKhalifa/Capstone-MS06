@@ -1,6 +1,6 @@
+import { useRouter } from "expo-router";
 import React, { useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
-import { useRouter } from "expo-router";
 
 import { IconSymbol } from "../components/ui/icon-symbol";
 import { useAppState } from "../context/app-state";

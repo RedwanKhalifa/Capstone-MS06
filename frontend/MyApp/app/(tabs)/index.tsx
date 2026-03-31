@@ -60,7 +60,7 @@ export default function HomeScreen() {
   const [labelTracksViewChanges, setLabelTracksViewChanges] = useState(true);
   const engBuilding = TMU_BUILDINGS.find((entry) => entry.code === "ENG") ?? null;
   const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) <= 29;
-  const showCampusOverlays = !selectedBuilding && !searchQuery.trim();
+  const showCampusOverlays = !selectedBuilding;
 
   const legacyAndroidMapHtml = useMemo(() => {
     const overlays = showCampusOverlays
@@ -362,6 +362,7 @@ export default function HomeScreen() {
               onChangeText={setSearchQuery}
               onFocus={() => {
                 setSelectedBuilding(null);
+                setSheetOpen(false);
                 setSearchActive(true);
               }}
             />
@@ -460,25 +461,27 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      <View style={[styles.sheet, sheetOpen && styles.sheetOpen]}>
-        <Pressable style={styles.sheetHandle} onPress={() => setSheetOpen((open) => !open)}>
-          <View style={styles.sheetGrip} />
-        </Pressable>
-        <Pressable style={styles.sheetTitle} onPress={() => setSheetOpen(true)}>
-          <Text style={styles.sheetTitleText}>
-            List of all buildings at Toronto Metropolitan University
-          </Text>
-        </Pressable>
-        {sheetOpen && (
-          <ScrollView style={styles.sheetList}>
-            {TMU_BUILDINGS.map((building) => (
-              <Text key={building.code} style={styles.sheetItemText}>
-                {building.name} ({building.code})
-              </Text>
-            ))}
-          </ScrollView>
-        )}
-      </View>
+      {!searchActive && (
+        <View style={[styles.sheet, sheetOpen && styles.sheetOpen]}>
+          <Pressable style={styles.sheetHandle} onPress={() => setSheetOpen((open) => !open)}>
+            <View style={styles.sheetGrip} />
+          </Pressable>
+          <Pressable style={styles.sheetTitle} onPress={() => setSheetOpen(true)}>
+            <Text style={styles.sheetTitleText}>
+              List of all buildings at Toronto Metropolitan University
+            </Text>
+          </Pressable>
+          {sheetOpen && (
+            <ScrollView style={styles.sheetList}>
+              {TMU_BUILDINGS.map((building) => (
+                <Text key={building.code} style={styles.sheetItemText}>
+                  {building.name} ({building.code})
+                </Text>
+              ))}
+            </ScrollView>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -520,6 +523,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
     paddingTop: 12,
+    paddingBottom: 145,
   },
   overlayLabel: {
     backgroundColor: "rgba(6, 12, 20, 0.84)",
