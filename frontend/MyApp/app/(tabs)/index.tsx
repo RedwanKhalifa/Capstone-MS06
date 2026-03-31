@@ -61,6 +61,7 @@ export default function HomeScreen() {
   const engBuilding = TMU_BUILDINGS.find((entry) => entry.code === "ENG") ?? null;
   const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) <= 29;
   const showCampusOverlays = !selectedBuilding;
+  const isSearchEngaged = searchActive || searchQuery.trim().length > 0;
 
   const legacyAndroidMapHtml = useMemo(() => {
     const overlays = showCampusOverlays
@@ -461,7 +462,7 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      {!searchActive && (
+      {!isSearchEngaged && (
         <View style={[styles.sheet, sheetOpen && styles.sheetOpen]}>
           <Pressable style={styles.sheetHandle} onPress={() => setSheetOpen((open) => !open)}>
             <View style={styles.sheetGrip} />
@@ -523,7 +524,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 145,
+    paddingBottom: 210,
   },
   overlayLabel: {
     backgroundColor: "rgba(6, 12, 20, 0.84)",
