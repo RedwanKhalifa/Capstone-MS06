@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { IndoorRoutingMap } from "@/components/indoor-navigation/indoor-routing-map";
+import { useAppState } from "@/context/app-state";
 import { usePositioning } from "@/context/positioning";
 
 const FALLBACK_POSITION = { x: 0.82, y: 0.42, timestamp: 0, planId: "ENG4_NORTH" };
@@ -14,6 +15,7 @@ const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
 export default function IndoorNavigationScreen() {
   const router = useRouter();
+  const { devModeEnabled } = useAppState();
   const positioning = usePositioning();
   const currentPosition = positioning.prediction ?? FALLBACK_POSITION;
   const params = useLocalSearchParams<{ destination?: string }>();
@@ -83,8 +85,9 @@ export default function IndoorNavigationScreen() {
         <IndoorRoutingMap destination={requestedDestination} onRouteComputed={setRouteNodeIds} />
       </View>
 
-      <View style={styles.metaCard}>
-        <Text style={styles.metaTitle}>Manual D-Pad (Testing)</Text>
+      {devModeEnabled ? (
+        <View style={styles.metaCard}>
+          <Text style={styles.metaTitle}>Manual D-Pad (Testing)</Text>
 
         <View style={styles.dpadWrap}>
           <Pressable
@@ -134,10 +137,11 @@ export default function IndoorNavigationScreen() {
           ))}
         </View>
 
-        <Text style={styles.hintText}>Pressing any direction switches to manual position mode.</Text>
-        <Text style={styles.hintText}>Step size: {manualStep.toFixed(3)} normalized units</Text>
-        <Text style={styles.hintText}>Mode: {positioning.liveMode.toUpperCase()}</Text>
-      </View>
+          <Text style={styles.hintText}>Pressing any direction switches to manual position mode.</Text>
+          <Text style={styles.hintText}>Step size: {manualStep.toFixed(3)} normalized units</Text>
+          <Text style={styles.hintText}>Mode: {positioning.liveMode.toUpperCase()}</Text>
+        </View>
+      ) : null}
 
       {requestedDestination ? <Text style={styles.destLabel}>Destination: {requestedDestination}</Text> : null}
       {routeNodeIds.length > 1 ? (
@@ -146,8 +150,8 @@ export default function IndoorNavigationScreen() {
 
       <View style={styles.metaCard}>
         <Text style={styles.metaTitle}>Live Position</Text>
-        <Text>X: {currentPosition.x.toFixed(3)}</Text>
-        <Text>Y: {currentPosition.y.toFixed(3)}</Text>
+        {devModeEnabled ? <Text>X: {currentPosition.x.toFixed(3)}</Text> : null}
+        {devModeEnabled ? <Text>Y: {currentPosition.y.toFixed(3)}</Text> : null}
         <Text>Last update: {new Date(currentPosition.timestamp).toLocaleTimeString()}</Text>
         <Text>Plan: {currentPosition.planId ?? "ENG4_NORTH"}</Text>
       </View>

@@ -20,6 +20,8 @@ export default function SettingsScreen() {
     isLoggedIn,
     studentAccount,
     logoutUser,
+    devModeEnabled,
+    setDevModeEnabled,
   } = useAppState();
   const [unitsEnabled, setUnitsEnabled] = useState(true);
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
@@ -79,6 +81,12 @@ export default function SettingsScreen() {
       <Pressable style={styles.menuButton} onPress={() => router.push("/positioning-setup")}>
         <Text style={styles.menuButtonText}>Open Positioning Setup (Collect / Live / Plans)</Text>
       </Pressable>
+
+      <Text style={styles.sectionTitle}>Developer</Text>
+      <View style={styles.row}>
+        <Text style={styles.rowText}>Developer mode</Text>
+        <Switch value={devModeEnabled} onValueChange={setDevModeEnabled} />
+      </View>
 
       <Text style={styles.sectionTitle}>Account</Text>
       <View style={styles.row}>

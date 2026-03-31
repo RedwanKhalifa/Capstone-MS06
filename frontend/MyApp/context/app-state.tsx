@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 
 type AccessibilitySettings = {
@@ -64,6 +64,9 @@ type AppStateContextValue = {
   calendarEvents: CalendarClassEvent[];
   upsertManualClass: (input: EditableClassInput) => { ok: boolean; message?: string };
   deleteManualClass: (eventId: string) => void;
+  setIsLoggedIn: (value: boolean) => void;
+  devModeEnabled: boolean;
+  setDevModeEnabled: (value: boolean) => void;
   accessibility: AccessibilitySettings;
   setAccessibility: (value: AccessibilitySettings) => void;
   setAllAccessibility: (value: boolean) => void;
@@ -280,6 +283,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [studentAccount, setStudentAccount] = useState<StudentAccount | null>(null);
   const [connectedCalendars, setConnectedCalendars] = useState<ConnectedCalendar[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarClassEvent[]>([]);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [devModeEnabled, setDevModeEnabled] = useState(true);
   const [accessibility, setAccessibility] = useState<AccessibilitySettings>({
     highContrast: true,
     largeText: true,
@@ -440,23 +445,37 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     setCalendarEvents((current) => current.filter((event) => event.id !== eventId));
   };
 
-  const value = {
-    isLoggedIn: studentAccount !== null,
-    studentAccount,
-    registerLocalAccount,
-    loginLocalAccount,
-    logoutUser,
-    connectedCalendars,
-    setCalendarSelected,
-    calendarEvents,
-    upsertManualClass,
-    deleteManualClass,
-    accessibility,
-    setAccessibility,
-    setAllAccessibility,
-    saved,
-    setSaved,
-  };
+  const value = useMemo(
+    () => ({
+      isLoggedIn: studentAccount !== null || isLoggedIn,
+      studentAccount,
+      registerLocalAccount,
+      loginLocalAccount,
+      logoutUser,
+      connectedCalendars,
+      setCalendarSelected,
+      calendarEvents,
+      upsertManualClass,
+      deleteManualClass,
+      setIsLoggedIn,
+      devModeEnabled,
+      setDevModeEnabled,
+      accessibility,
+      setAccessibility,
+      setAllAccessibility,
+      saved,
+      setSaved,
+    }),
+    [
+      studentAccount,
+      isLoggedIn,
+      devModeEnabled,
+      accessibility,
+      saved,
+      connectedCalendars,
+      calendarEvents,
+    ]
+  );
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }
