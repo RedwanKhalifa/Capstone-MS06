@@ -14,7 +14,7 @@ const ABOUT_ITEMS = [
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { accessibility, setAccessibility, isLoggedIn } = useAppState();
+  const { accessibility, setAccessibility, isLoggedIn, devModeEnabled, setDevModeEnabled } = useAppState();
   const [unitsEnabled, setUnitsEnabled] = useState(true);
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState({
@@ -73,6 +73,12 @@ export default function SettingsScreen() {
       <Pressable style={styles.menuButton} onPress={() => router.push("/positioning-setup")}>
         <Text style={styles.menuButtonText}>Open Positioning Setup (Collect / Live / Plans)</Text>
       </Pressable>
+
+      <Text style={styles.sectionTitle}>Developer</Text>
+      <View style={styles.row}>
+        <Text style={styles.rowText}>Developer mode</Text>
+        <Switch value={devModeEnabled} onValueChange={setDevModeEnabled} />
+      </View>
 
       <Text style={styles.sectionTitle}>Account</Text>
       <View style={styles.row}>

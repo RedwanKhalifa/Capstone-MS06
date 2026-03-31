@@ -189,7 +189,7 @@ export default function HomeScreen() {
     const buildingMatches = TMU_BUILDINGS.filter((building) => {
       const candidate = `${building.code} ${building.name}`.toLowerCase();
       return candidate.includes(query);
-    }).map((building) => {
+    }).map((building, index) => {
       const code = building.code.toLowerCase();
       const name = building.name.toLowerCase();
       let rank = 4;
@@ -205,7 +205,7 @@ export default function HomeScreen() {
       }
 
       return {
-        key: `building-${building.code}`,
+        key: `building-${building.code}-${building.name}-${index}`,
         value: `${building.code} - ${building.name}`,
         title: building.code,
         subtitle: building.name,

@@ -1,3 +1,4 @@
+import { useAppState } from "@/context/app-state";
 import { usePositioning } from "@/context/positioning";
 import {
     loadRoutingGraph,
@@ -184,6 +185,7 @@ function withEuclideanEdgeWeights(
 }
 
 export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
+  const { devModeEnabled } = useAppState();
   const positioning = usePositioning();
   const activePlanId = (positioning as any).activePlanId as "ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN" ?? "ENG4_NORTH";
   const isRoutingPlan = true;
@@ -260,6 +262,13 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     x: point.x * scaleX,
     y: point.y * scaleY,
   });
+
+  useEffect(() => {
+    if (devModeEnabled) return;
+    setShowNodes(false);
+    setIsEditMode(false);
+    setIsAddNodeMode(false);
+  }, [devModeEnabled]);
 
   useEffect(() => {
     if (isRoutingPlan) return;
@@ -994,65 +1003,71 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           <Text style={styles.autoStartText}>Auto nearest node: {selectedStartId ?? "N/A"}</Text>
         </View>
 
-        <View style={styles.selectorColumn}>
-          <Text style={styles.selectorLabel}>End</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <TouchableOpacity
-              key="clear-end"
-              onPress={() => {
-                setSelectedEndId(null);
-                setSelectedStartId(null);
-                stopPathSimulation();
-                setFloorPaths((prev) => ({ ...prev, [activeFloor]: [] }));
-                if (onRouteComputed) onRouteComputed([]);
-              }}
-              style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
-              <Text style={selectedEndId === null ? styles.nodeButtonTextSelected : styles.nodeButtonText}>Clear</Text>
-            </TouchableOpacity>
-            {nodesOnCurrentFloor.map((node) => (
+        {devModeEnabled ? (
+          <View style={styles.selectorColumn}>
+            <Text style={styles.selectorLabel}>End</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <TouchableOpacity
-                key={node.id}
+                key="clear-end"
                 onPress={() => {
-                  if (isEditMode) {
-                    setEditingNodeId(node.id);
-                    return;
-                  }
-                  setSelectedEndId(node.id);
+                  setSelectedEndId(null);
+                  setSelectedStartId(null);
+                  stopPathSimulation();
+                  setFloorPaths((prev) => ({ ...prev, [activeFloor]: [] }));
+                  if (onRouteComputed) onRouteComputed([]);
                 }}
-                style={[
-                  styles.nodeButton,
-                  (isEditMode ? editingNodeId === node.id : selectedEndId === node.id) && styles.nodeButtonSelected,
-                ]}>
-                <Text
-                  style={
-                    (isEditMode ? editingNodeId === node.id : selectedEndId === node.id)
-                      ? styles.nodeButtonTextSelected
-                      : styles.nodeButtonText
-                  }>
-                  {node.id}
-                </Text>
+                style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
+                <Text style={selectedEndId === null ? styles.nodeButtonTextSelected : styles.nodeButtonText}>Clear</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+              {nodesOnCurrentFloor.map((node) => (
+                <TouchableOpacity
+                  key={node.id}
+                  onPress={() => {
+                    if (isEditMode) {
+                      setEditingNodeId(node.id);
+                      return;
+                    }
+                    setSelectedEndId(node.id);
+                  }}
+                  style={[
+                    styles.nodeButton,
+                    (isEditMode ? editingNodeId === node.id : selectedEndId === node.id) && styles.nodeButtonSelected,
+                  ]}>
+                  <Text
+                    style={
+                      (isEditMode ? editingNodeId === node.id : selectedEndId === node.id)
+                        ? styles.nodeButtonTextSelected
+                        : styles.nodeButtonText
+                    }>
+                    {node.id}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.editContainer}>
-        <TouchableOpacity
-          style={[styles.editToggleButton, shouldShowNodes && styles.editToggleButtonActive]}
-          onPress={() => setShowNodes((prev) => !prev)}>
-          <Text style={shouldShowNodes ? styles.editToggleTextActive : styles.editToggleText}>
-            {shouldShowNodes ? "Nodes: ON" : "Nodes: OFF"}
-          </Text>
-        </TouchableOpacity>
+        {devModeEnabled ? (
+          <TouchableOpacity
+            style={[styles.editToggleButton, shouldShowNodes && styles.editToggleButtonActive]}
+            onPress={() => setShowNodes((prev) => !prev)}>
+            <Text style={shouldShowNodes ? styles.editToggleTextActive : styles.editToggleText}>
+              {shouldShowNodes ? "Nodes: ON" : "Nodes: OFF"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
-        <TouchableOpacity
-          style={[styles.editToggleButton, isEditMode && styles.editToggleButtonActive]}
-          onPress={toggleEditMode}>
-          <Text style={isEditMode ? styles.editToggleTextActive : styles.editToggleText}>
-            {isEditMode ? "Node Edit: ON" : "Node Edit: OFF"}
-          </Text>
-        </TouchableOpacity>
+        {devModeEnabled ? (
+          <TouchableOpacity
+            style={[styles.editToggleButton, isEditMode && styles.editToggleButtonActive]}
+            onPress={toggleEditMode}>
+            <Text style={isEditMode ? styles.editToggleTextActive : styles.editToggleText}>
+              {isEditMode ? "Node Edit: ON" : "Node Edit: OFF"}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity
           style={[styles.editToggleButton, isNavigateMode && styles.editToggleButtonActive]}

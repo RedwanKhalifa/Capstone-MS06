@@ -15,6 +15,8 @@ type SavedCollections = {
 type AppStateContextValue = {
   isLoggedIn: boolean;
   setIsLoggedIn: (value: boolean) => void;
+  devModeEnabled: boolean;
+  setDevModeEnabled: (value: boolean) => void;
   accessibility: AccessibilitySettings;
   setAccessibility: (value: AccessibilitySettings) => void;
   setAllAccessibility: (value: boolean) => void;
@@ -26,6 +28,7 @@ const AppStateContext = createContext<AppStateContextValue | undefined>(undefine
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [devModeEnabled, setDevModeEnabled] = useState(true);
   const [accessibility, setAccessibility] = useState<AccessibilitySettings>({
     highContrast: true,
     largeText: true,
@@ -49,13 +52,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     () => ({
       isLoggedIn,
       setIsLoggedIn,
+      devModeEnabled,
+      setDevModeEnabled,
       accessibility,
       setAccessibility,
       setAllAccessibility,
       saved,
       setSaved,
     }),
-    [isLoggedIn, accessibility, saved]
+    [isLoggedIn, devModeEnabled, accessibility, saved]
   );
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
