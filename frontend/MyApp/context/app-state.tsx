@@ -1,3 +1,4 @@
+import * as FileSystem from "expo-file-system/legacy";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 
@@ -226,6 +227,30 @@ const STARTER_TIMETABLE: CalendarClassEvent[] = [
 ];
 
 const APP_STATE_STORAGE_KEY = "capstone-ms06:app-state";
+const DEV_MODE_STORAGE_FILE = `${FileSystem.documentDirectory}dev-mode.json`;
+
+const loadNativeDevMode = async (): Promise<boolean | null> => {
+  try {
+    const info = await FileSystem.getInfoAsync(DEV_MODE_STORAGE_FILE);
+    if (!info.exists) return null;
+    const raw = await FileSystem.readAsStringAsync(DEV_MODE_STORAGE_FILE);
+    const parsed = JSON.parse(raw) as { devModeEnabled?: boolean };
+    return typeof parsed.devModeEnabled === "boolean" ? parsed.devModeEnabled : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveNativeDevMode = async (value: boolean) => {
+  try {
+    await FileSystem.writeAsStringAsync(
+      DEV_MODE_STORAGE_FILE,
+      JSON.stringify({ devModeEnabled: value })
+    );
+  } catch {
+    // Ignore persistence failures so the app remains usable.
+  }
+};
 
 const AppStateContext = createContext<AppStateContextValue | undefined>(undefined);
 
@@ -297,48 +322,63 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    if (Platform.OS !== "web") return;
-    try {
-      const raw = globalThis.localStorage?.getItem(APP_STATE_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        accountRecord?: LocalAccountRecord | null;
-        studentAccount?: StudentAccount | null;
-        connectedCalendars?: ConnectedCalendar[];
-        calendarEvents?: CalendarClassEvent[];
-        accessibility?: AccessibilitySettings;
-        saved?: SavedCollections;
-      };
+    if (Platform.OS === "web") {
+      try {
+        const raw = globalThis.localStorage?.getItem(APP_STATE_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          accountRecord?: LocalAccountRecord | null;
+          studentAccount?: StudentAccount | null;
+          connectedCalendars?: ConnectedCalendar[];
+          calendarEvents?: CalendarClassEvent[];
+          devModeEnabled?: boolean;
+          accessibility?: AccessibilitySettings;
+          saved?: SavedCollections;
+        };
 
-      if (parsed.accountRecord) setAccountRecord(parsed.accountRecord);
-      if (parsed.studentAccount) setStudentAccount(parsed.studentAccount);
-      if (parsed.connectedCalendars) setConnectedCalendars(parsed.connectedCalendars);
-      if (parsed.calendarEvents) setCalendarEvents(parsed.calendarEvents);
-      if (parsed.accessibility) setAccessibility(parsed.accessibility);
-      if (parsed.saved) setSaved(parsed.saved);
-    } catch {
-      // Ignore corrupted local state and continue with defaults.
+        if (parsed.accountRecord) setAccountRecord(parsed.accountRecord);
+        if (parsed.studentAccount) setStudentAccount(parsed.studentAccount);
+        if (parsed.connectedCalendars) setConnectedCalendars(parsed.connectedCalendars);
+        if (parsed.calendarEvents) setCalendarEvents(parsed.calendarEvents);
+        if (typeof parsed.devModeEnabled === "boolean") setDevModeEnabled(parsed.devModeEnabled);
+        if (parsed.accessibility) setAccessibility(parsed.accessibility);
+        if (parsed.saved) setSaved(parsed.saved);
+      } catch {
+        // Ignore corrupted local state and continue with defaults.
+      }
+      return;
     }
+
+    loadNativeDevMode().then((value) => {
+      if (typeof value === "boolean") {
+        setDevModeEnabled(value);
+      }
+    });
   }, []);
 
   useEffect(() => {
-    if (Platform.OS !== "web") return;
-    try {
-      globalThis.localStorage?.setItem(
-        APP_STATE_STORAGE_KEY,
-        JSON.stringify({
-          accountRecord,
-          studentAccount,
-          connectedCalendars,
-          calendarEvents,
-          accessibility,
-          saved,
-        })
-      );
-    } catch {
-      // Ignore persistence failures so the app remains usable.
+    if (Platform.OS === "web") {
+      try {
+        globalThis.localStorage?.setItem(
+          APP_STATE_STORAGE_KEY,
+          JSON.stringify({
+            accountRecord,
+            studentAccount,
+            connectedCalendars,
+            calendarEvents,
+            devModeEnabled,
+            accessibility,
+            saved,
+          })
+        );
+      } catch {
+        // Ignore persistence failures so the app remains usable.
+      }
+      return;
     }
-  }, [accountRecord, studentAccount, connectedCalendars, calendarEvents, accessibility, saved]);
+
+    saveNativeDevMode(devModeEnabled);
+  }, [accountRecord, studentAccount, connectedCalendars, calendarEvents, devModeEnabled, accessibility, saved]);
 
   const setAllAccessibility = (value: boolean) => {
     setAccessibility({

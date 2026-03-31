@@ -50,18 +50,20 @@ type SearchResultItem = {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { saved, setAllAccessibility } = useAppState();
+  const { saved, setAllAccessibility, devModeEnabled } = useAppState();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedBuilding, setSelectedBuilding] = useState<BuildingEntry | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  const [detailImageVisible, setDetailImageVisible] = useState(true);
   const [labelTracksViewChanges, setLabelTracksViewChanges] = useState(true);
   const engBuilding = TMU_BUILDINGS.find((entry) => entry.code === "ENG") ?? null;
   const isLegacyAndroid = Platform.OS === "android" && Number(Platform.Version) <= 29;
   const showCampusOverlays = !selectedBuilding;
-  const isSearchEngaged = searchActive || searchQuery.trim().length > 0;
+  const hasSearchText = searchQuery.trim().length > 0;
+  const isSearchEngaged = searchActive || hasSearchText;
 
   const legacyAndroidMapHtml = useMemo(() => {
     const overlays = showCampusOverlays
@@ -275,6 +277,10 @@ export default function HomeScreen() {
     setSearchActive(false);
   };
 
+  useEffect(() => {
+    setDetailImageVisible(true);
+  }, [selectedBuilding?.code]);
+
   const handleLegacyAndroidMapMessage = (event: WebViewMessageEvent) => {
     try {
       const payload = JSON.parse(event.nativeEvent.data) as { type?: string; code?: string };
@@ -352,7 +358,13 @@ export default function HomeScreen() {
           </MapView>
         )}
 
-        <View style={styles.mapContent}>
+        <View
+          style={[
+            styles.mapContent,
+            hasSearchText && styles.mapContentSearch,
+            !!selectedBuilding && styles.mapContentExpanded,
+          ]}
+        >
           <View style={styles.searchBar}>
             <IconSymbol name="magnifyingglass" color="#4a4a4a" size={20} />
             <TextInput
@@ -366,19 +378,24 @@ export default function HomeScreen() {
                 setSheetOpen(false);
                 setSearchActive(true);
               }}
+              onBlur={() => {
+                setSearchActive(searchQuery.trim().length > 0);
+              }}
             />
             <Pressable>
               <IconSymbol name="microphone" color="#4a4a4a" size={20} />
             </Pressable>
           </View>
 
-          <Pressable style={styles.quickIndoorButton} onPress={() => router.push("/indoor")}>
-            <IconSymbol name="figure.walk" color="#f3d400" size={20} />
-            <Text style={styles.quickIndoorButtonText}>Go to Indoor Navigation</Text>
-          </Pressable>
+          {devModeEnabled && (
+            <Pressable style={styles.quickIndoorButton} onPress={() => router.push("/indoor")}>
+              <IconSymbol name="figure.walk" color="#f3d400" size={20} />
+              <Text style={styles.quickIndoorButtonText}>Go to Indoor Navigation</Text>
+            </Pressable>
+          )}
 
           {!!selectedBuilding && (
-            <View style={styles.detailCard}>
+            <ScrollView style={styles.detailCard} contentContainerStyle={styles.detailCardContent}>
               <Pressable
                 onPress={() => {
                   setSelectedBuilding(null);
@@ -399,7 +416,6 @@ export default function HomeScreen() {
                 )}
               </View>
               <Text style={styles.detailSubtitle}>{selectedBuilding.name}</Text>
-              <Image source={{ uri: selectedBuilding.image }} style={styles.detailImage} />
               <View style={styles.detailButtons}>
                 <Pressable
                   style={styles.detailButton}
@@ -418,15 +434,22 @@ export default function HomeScreen() {
                   </Pressable>
                 )}
               </View>
+              {detailImageVisible && selectedBuilding.image.trim().length > 0 && (
+                <Image
+                  source={{ uri: selectedBuilding.image }}
+                  style={styles.detailImage}
+                  onError={() => setDetailImageVisible(false)}
+                />
+              )}
               <Text style={styles.detailDescription}>{selectedBuilding.description}</Text>
               <Text style={styles.detailSection}>Accessibility</Text>
               <Text style={styles.detailDescription}>{selectedBuilding.accessibility}</Text>
-            </View>
+            </ScrollView>
           )}
 
-          {!selectedBuilding && searchActive && filteredResults.length > 0 && (
+          {!selectedBuilding && hasSearchText && filteredResults.length > 0 && (
             <View style={styles.resultsCard}>
-              <Text style={styles.resultsTitle}>{searchQuery ? "Results" : "Recent"}</Text>
+              <Text style={styles.resultsTitle}>Results</Text>
               <ScrollView style={styles.resultsList}>
                 {filteredResults.map((item) => (
                   <Pressable
@@ -524,7 +547,13 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 210,
+    paddingBottom: 24,
+  },
+  mapContentExpanded: {
+    paddingBottom: 76,
+  },
+  mapContentSearch: {
+    paddingBottom: 72,
   },
   overlayLabel: {
     backgroundColor: "rgba(6, 12, 20, 0.84)",
@@ -634,6 +663,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#d4d0df",
     borderRadius: 16,
     padding: 14,
+    maxHeight: 320,
+  },
+  detailCardContent: {
+    paddingBottom: 20,
   },
   backText: {
     color: "#2b3ea0",
