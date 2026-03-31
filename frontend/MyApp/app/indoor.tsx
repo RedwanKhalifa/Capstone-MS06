@@ -144,7 +144,7 @@ export default function IndoorNavigationScreen() {
       ) : null}
 
       {requestedDestination ? <Text style={styles.destLabel}>Destination: {requestedDestination}</Text> : null}
-      {routeNodeIds.length > 1 ? (
+      {devModeEnabled && routeNodeIds.length > 1 ? (
         <Text style={styles.routeLabel}>Dijkstra route: {routeNodeIds.join(" -> ")}</Text>
       ) : null}
 

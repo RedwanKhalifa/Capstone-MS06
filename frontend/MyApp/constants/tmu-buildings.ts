@@ -347,9 +347,11 @@ export const TMU_BUILDINGS: BuildingEntry[] = [
   },
 ];
 
-export const ENG_ROOMS = Array.from({ length: 40 }, (_, index) => {
+const GENERATED_ENG_ROOMS = Array.from({ length: 40 }, (_, index) => {
   const floor = Math.floor(index / 10) + 1;
   const roomOffset = (index % 10) + 1;
   const roomNumber = `${floor}${roomOffset.toString().padStart(2, "0")}`;
   return `ENG ${roomNumber}`;
 });
+
+export const ENG_ROOMS = [...GENERATED_ENG_ROOMS, "ENG 448", "ENG 460"];

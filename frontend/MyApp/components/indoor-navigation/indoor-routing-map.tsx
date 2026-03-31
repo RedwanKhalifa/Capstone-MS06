@@ -57,6 +57,10 @@ const DESTINATION_REACHED_THRESHOLD_PX = 9;
 const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", Record<string, string>> = {
   ENG4_NORTH: {
     ENG103: "N12",
+    ENG448: "N14",
+    "ENG 448": "N14",
+    ENG460: "N7",
+    "ENG 460": "N7",
     LIB072: "N2",
     ENG: "N3",
   },
@@ -751,7 +755,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     if (!destination) return;
 
     const normalized = destination.trim().toUpperCase();
-    const mappedByRoom = PLAN_ROOM_TO_NODE[activePlanId]?.[normalized];
+    const normalizedNoSpace = normalized.replace(/\s+/g, "");
+    const mappedByRoom =
+      PLAN_ROOM_TO_NODE[activePlanId]?.[normalized] ??
+      PLAN_ROOM_TO_NODE[activePlanId]?.[normalizedNoSpace];
     const mappedByNodeId = graph.nodes.find(
       (node) => node.id.toUpperCase() === normalized && node.floor === activeFloor
     )?.id;
@@ -998,10 +1005,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   return (
     <View style={styles.wrapper}>
       <View style={styles.selectorContainer}>
-        <View style={styles.selectorColumn}>
-          <Text style={styles.selectorLabel}>Start</Text>
-          <Text style={styles.autoStartText}>Auto nearest node: {selectedStartId ?? "N/A"}</Text>
-        </View>
+        {devModeEnabled ? (
+          <View style={styles.selectorColumn}>
+            <Text style={styles.selectorLabel}>Start</Text>
+            <Text style={styles.autoStartText}>Auto nearest node: {selectedStartId ?? "N/A"}</Text>
+          </View>
+        ) : null}
 
         {devModeEnabled ? (
           <View style={styles.selectorColumn}>
