@@ -41,6 +41,24 @@ const PLAN_FLOORS: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOU
   ENG3_SOUTH: 2,
   HOME_MAIN: 40,
 };
+const FLOOR_TO_PLAN: Record<number, keyof typeof PLAN_FLOORS> = {
+  4: "ENG4_NORTH",
+  5: "ENG4_SOUTH",
+  3: "ENG3_NORTH",
+  2: "ENG3_SOUTH",
+  40: "HOME_MAIN",
+};
+const FLOOR_LABELS: Record<number, string> = {
+  4: "4N",
+  5: "4S",
+  3: "3N",
+  2: "3S",
+  40: "H",
+};
+const VERTICAL_CONNECTOR_LABELS: Record<string, string> = {
+  [edgeKey("N32", "3N4")]: "Stairs",
+  [edgeKey("N65", "3N56")]: "Elevator",
+};
 const CANONICAL_IMAGE_WIDTH = 800;
 const CANONICAL_IMAGE_HEIGHT = 600;
 const MIN_RENDER_WIDTH = 1200;
@@ -69,6 +87,11 @@ const PLAN_ROOM_TO_NODE: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "EN
   ENG3_SOUTH: {},
   HOME_MAIN: {},
 };
+
+const GLOBAL_ROOM_TO_NODE: Record<string, string> = Object.values(PLAN_ROOM_TO_NODE).reduce(
+  (acc, planMap) => ({ ...acc, ...planMap }),
+  {} as Record<string, string>
+);
 
 const PLAN_IMAGES: Record<"ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN", any> = {
   ENG4_NORTH: require("../../assets/images/eng4_north.png"),
@@ -222,10 +245,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const [graph, setGraph] = useState<RoutingGraph>(DEFAULT_GRAPH);
   const [graphLoaded, setGraphLoaded] = useState(false);
   const [floorPaths, setFloorPaths] = useState<Record<number, { x: number; y: number }[]>>({});
+  const [routeNodeIds, setRouteNodeIds] = useState<string[]>([]);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulatedFloor, setSimulatedFloor] = useState<number | null>(null);
   const [selectedStartId, setSelectedStartId] = useState<string | null>(null);
   const [selectedEndId, setSelectedEndId] = useState<string | null>(null);
+  const [routeStartOverrideId, setRouteStartOverrideId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [showNodes, setShowNodes] = useState(false);
   const [isNavigateMode, setIsNavigateMode] = useState(false);
@@ -238,8 +263,17 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const imageZoomRef = useRef<any>(null);
   const locationAnims = useRef<Record<number, Animated.ValueXY>>({});
   const liveAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const mapOpacity = useRef(new Animated.Value(1)).current;
   const animationRef = useRef<any>(null);
   const simLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTransitionRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentFloorTransitionRef = useRef<{
+    fromId: string;
+    toId: string;
+    fromFloor: number;
+    toFloor: number;
+    connector: string;
+  } | null>(null);
   const simIsRunningRef = useRef(false);
   const simPendingRef = useRef<{ points: { x: number; y: number }[]; floor: number } | null>(null);
   const simLastCompletedRef = useRef<{ points: { x: number; y: number }[]; floor: number } | null>(null);
@@ -262,6 +296,70 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
   const destinationMarkerInnerRadius = Math.max(3, Math.min(14, 5 / markerScale));
   const destinationMarkerStrokeWidth = Math.max(1, Math.min(6, 2 / markerScale));
 
+  const allNodesSorted = useMemo(
+    () => [...graph.nodes].sort((a, b) => a.floor - b.floor || a.id.localeCompare(b.id)),
+    [graph.nodes]
+  );
+
+  const upcomingFloorTransition = useMemo(() => {
+    if (routeNodeIds.length < 2) return null;
+
+    const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+    for (let i = 0; i < routeNodeIds.length - 1; i += 1) {
+      const fromId = routeNodeIds[i];
+      const toId = routeNodeIds[i + 1];
+      const fromNode = nodeById.get(fromId);
+      const toNode = nodeById.get(toId);
+      if (!fromNode || !toNode) continue;
+      if (fromNode.floor !== activeFloor) continue;
+      if (fromNode.floor === toNode.floor) continue;
+      return {
+        fromId,
+        toId,
+        fromFloor: fromNode.floor,
+        toFloor: toNode.floor,
+        connector: VERTICAL_CONNECTOR_LABELS[edgeKey(fromId, toId)] ?? "Transition",
+      };
+    }
+
+    return null;
+  }, [activeFloor, graph.nodes, routeNodeIds]);
+
+  function transitionToRouteFloor(transition: { toFloor: number; toId: string }) {
+    const nextPlan = FLOOR_TO_PLAN[transition.toFloor];
+    if (!nextPlan) return;
+    setRouteStartOverrideId(transition.toId);
+    transitionToPlan(nextPlan);
+  }
+
+  useEffect(() => {
+    currentFloorTransitionRef.current = upcomingFloorTransition;
+  }, [upcomingFloorTransition]);
+
+  // In navigate mode there is no floor-segment simulation, so keep a short timer-based
+  // handoff. In normal mode, the handoff is triggered when the blue-dot simulation
+  // reaches the connector.
+  useEffect(() => {
+    if (pendingTransitionRef.current) {
+      clearTimeout(pendingTransitionRef.current);
+      pendingTransitionRef.current = null;
+    }
+    if (!upcomingFloorTransition || !isNavigateMode) return;
+
+    pendingTransitionRef.current = setTimeout(() => {
+      pendingTransitionRef.current = null;
+      transitionToRouteFloor(upcomingFloorTransition);
+    }, 2000);
+
+    return () => {
+      if (pendingTransitionRef.current) {
+        clearTimeout(pendingTransitionRef.current);
+        pendingTransitionRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNavigateMode, upcomingFloorTransition]);
+
   const toRenderedPoint = (point: { x: number; y: number }) => ({
     x: point.x * scaleX,
     y: point.y * scaleY,
@@ -279,6 +377,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     stopPathSimulation();
     setSelectedEndId(null);
     setSelectedStartId(null);
+    setRouteStartOverrideId(null);
+    setRouteNodeIds([]);
     setFloorPaths({});
     if (onRouteComputed) onRouteComputed([]);
   }, [isRoutingPlan, onRouteComputed]);
@@ -638,6 +738,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       clearTimeout(simLoopTimerRef.current);
       simLoopTimerRef.current = null;
     }
+    if (pendingTransitionRef.current) {
+      clearTimeout(pendingTransitionRef.current);
+      pendingTransitionRef.current = null;
+    }
     simIsRunningRef.current = false;
     simPendingRef.current = null;
     simLastCompletedRef.current = null;
@@ -680,6 +784,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       animationRef.current = null;
       simIsRunningRef.current = false;
       simLastCompletedRef.current = { points, floor };
+
+      const floorTransition = currentFloorTransitionRef.current;
+      if (!isNavigateMode && floorTransition && floorTransition.fromFloor === floor) {
+        transitionToRouteFloor(floorTransition);
+        return;
+      }
 
       if (isNavigateMode) {
         setIsSimulating(false);
@@ -756,20 +866,17 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
     const normalized = destination.trim().toUpperCase();
     const normalizedNoSpace = normalized.replace(/\s+/g, "");
-    const mappedByRoom =
-      PLAN_ROOM_TO_NODE[activePlanId]?.[normalized] ??
-      PLAN_ROOM_TO_NODE[activePlanId]?.[normalizedNoSpace];
-    const mappedByNodeId = graph.nodes.find(
-      (node) => node.id.toUpperCase() === normalized && node.floor === activeFloor
-    )?.id;
+    const mappedByRoom = GLOBAL_ROOM_TO_NODE[normalized] ?? GLOBAL_ROOM_TO_NODE[normalizedNoSpace];
+    const mappedByNodeId = graph.nodes.find((node) => node.id.toUpperCase() === normalized)?.id;
     const mappedEnd = mappedByRoom ?? mappedByNodeId;
     if (!mappedEnd) return;
 
     const endNode = graph.nodes.find((node) => node.id === mappedEnd);
-    if (!endNode || endNode.floor !== activeFloor) return;
+    if (!endNode) return;
 
+    setRouteStartOverrideId(null);
     setSelectedEndId(mappedEnd);
-  }, [activeFloor, activePlanId, destination, graph.nodes]);
+  }, [destination, graph.nodes]);
 
   useEffect(() => {
     if (!positioning.prediction) return;
@@ -821,7 +928,9 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     stopPathSimulation();
     setSelectedEndId(null);
     setSelectedStartId(null);
-    setFloorPaths((prev) => ({ ...prev, [endNode.floor]: [] }));
+    setRouteStartOverrideId(null);
+    setRouteNodeIds([]);
+    setFloorPaths({});
     if (onRouteComputed) onRouteComputed([]);
     Alert.alert("Destination Reached");
   }, [graph.nodes, isRoutingPlan, livePointNorm.x, livePointNorm.y, onRouteComputed, selectedEndId]);
@@ -833,14 +942,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     const endNode = graph.nodes.find((node) => node.id === selectedEndId);
     if (!endNode) return;
 
-    const floorNodes = graph.nodes.filter((node) => node.floor === endNode.floor);
-    const floorEdges: Record<string, Edge[]> = {};
-
-    floorNodes.forEach((node) => {
-      floorEdges[node.id] = (weightedEdges[node.id] || []).filter((edge) =>
-        floorNodes.some((candidate) => candidate.id === edge.target)
-      );
-    });
+    const allNodes = graph.nodes;
+    const allEdges = weightedEdges;
 
     // Prefer the live context prediction (always current) over the animation-synced state.
     const liveCanonical = {
@@ -848,12 +951,22 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       y: livePointNorm.y * CANONICAL_IMAGE_HEIGHT,
     };
 
-    let routeNodes = floorNodes;
-    let routeEdges = floorEdges;
+    const overrideStartNode = routeStartOverrideId
+      ? graph.nodes.find((node) => node.id === routeStartOverrideId && node.floor === activeFloor) ?? null
+      : null;
+
+    const startFloorNodes = graph.nodes.filter((node) => node.floor === activeFloor);
+
+    let routeNodes = allNodes;
+    let routeEdges = allEdges;
     let autoStartId: string | null = null;
 
-    if (endNode.floor === activeFloor && floorNodes.length >= 2) {
-      const nodeById = new Map(floorNodes.map((node) => [node.id, node]));
+    if (overrideStartNode) {
+      autoStartId = overrideStartNode.id;
+    }
+
+    if (!autoStartId && startFloorNodes.length >= 2) {
+      const nodeById = new Map(startFloorNodes.map((node) => [node.id, node]));
       const seen = new Set<string>();
       let best:
         | {
@@ -865,7 +978,12 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           }
         | null = null;
 
-      Object.entries(floorEdges).forEach(([fromId, list]) => {
+      startFloorNodes.forEach((node) => {
+        const fromId = node.id;
+        const list = (allEdges[fromId] || []).filter((edge) => {
+          const target = graph.nodes.find((candidate) => candidate.id === edge.target);
+          return target?.floor === activeFloor;
+        });
         const from = nodeById.get(fromId);
         if (!from) return;
         list.forEach((edge) => {
@@ -892,16 +1010,16 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           id: TEMP_START_NODE_ID,
           x: Math.round(best.x),
           y: Math.round(best.y),
-          floor: endNode.floor,
+          floor: activeFloor,
         };
 
         const from = nodeById.get(best.fromId);
         const to = nodeById.get(best.toId);
         if (from && to) {
-          routeNodes = [...floorNodes, tempStart];
+          routeNodes = [...allNodes, tempStart];
           routeEdges = {};
-          floorNodes.forEach((node) => {
-            routeEdges[node.id] = [...(floorEdges[node.id] || [])];
+          allNodes.forEach((node) => {
+            routeEdges[node.id] = [...(allEdges[node.id] || [])];
           });
           routeEdges[TEMP_START_NODE_ID] = [];
 
@@ -919,10 +1037,8 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     }
 
     if (!autoStartId) {
-      if (endNode.floor === activeFloor) {
-        autoStartId = nearestNodeId(floorNodes, liveCanonical.x, liveCanonical.y);
-      }
-      if (!autoStartId) autoStartId = floorNodes[0]?.id ?? null;
+      autoStartId = nearestNodeId(startFloorNodes, liveCanonical.x, liveCanonical.y);
+      if (!autoStartId) autoStartId = startFloorNodes[0]?.id ?? null;
     }
     if (!autoStartId) return;
 
@@ -938,14 +1054,34 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       if (!isNavigateMode) {
         stopPathSimulation();
       }
-      setFloorPaths((prev) => ({ ...prev, [endNode.floor]: coords }));
+      const singleFloorPaths: Record<number, { x: number; y: number }[]> = {};
+      if (coords.length) {
+        const onlyFloor = coords[0].floor;
+        singleFloorPaths[onlyFloor] = coords;
+      }
+      setFloorPaths(singleFloorPaths);
+      setRouteNodeIds(reportIds);
       if (onRouteComputed) onRouteComputed(reportIds);
       return;
     }
 
-    setFloorPaths((prev) => ({ ...prev, [endNode.floor]: coords }));
+    // Group each route node into its own floor's path bucket.
+    // Each floor segment therefore ends exactly at the connector node (staircase/elevator)
+    // so the polyline on the source floor leads right up to it.
+    const nextFloorPaths: Record<number, { x: number; y: number }[]> = {};
+    coords.forEach((node) => {
+      if (!nextFloorPaths[node.floor]) nextFloorPaths[node.floor] = [];
+      nextFloorPaths[node.floor].push({ x: node.x, y: node.y });
+    });
+    setFloorPaths(nextFloorPaths);
+    setRouteNodeIds(reportIds);
     if (!isNavigateMode) {
-      queuePathSimulation(coords, endNode.floor);
+      const activeFloorCoords = nextFloorPaths[activeFloor] || [];
+      if (activeFloorCoords.length >= 2) {
+        queuePathSimulation(activeFloorCoords, activeFloor);
+      } else {
+        stopPathSimulation();
+      }
     }
     if (onRouteComputed) onRouteComputed(reportIds);
   }, [
@@ -955,11 +1091,55 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     onRouteComputed,
     selectedEndId,
     selectedStartId,
+    routeStartOverrideId,
     graph.nodes,
     weightedEdges,
     activeFloor,
     isNavigateMode,
   ]);
+
+  const transitionToPlan = (planId: keyof typeof PLAN_FLOORS, onSwitched?: () => void) => {
+    if (planId === activePlanId) {
+      onSwitched?.();
+      return;
+    }
+
+    Animated.timing(mapOpacity, {
+      toValue: 0.2,
+      duration: 170,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(() => {
+      positioning.setActivePlan(planId);
+      onSwitched?.();
+      Animated.timing(mapOpacity, {
+        toValue: 1,
+        duration: 230,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+
+  const handleNodeSelection = (node: GraphNode) => {
+    if (isEditMode) {
+      // In edit mode: switch to the node's floor and select it for editing
+      const targetPlan = FLOOR_TO_PLAN[node.floor];
+      if (targetPlan) {
+        transitionToPlan(targetPlan, () => setEditingNodeId(node.id));
+      } else {
+        setEditingNodeId(node.id);
+      }
+      return;
+    }
+
+    // In routing mode: set the destination and stay on the current floor.
+    // If the destination is on another floor, the route will lead to the
+    // staircase/elevator first. The transition banner will appear and let
+    // the user switch floors when ready.
+    setRouteStartOverrideId(null);
+    setSelectedEndId(node.id);
+  };
 
   const runDijkstra = (endId?: string) => {
     const end = endId ?? selectedEndId;
@@ -972,11 +1152,6 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     const endNode = graph.nodes.find((node) => node.id === end);
     if (!endNode) {
       Alert.alert("Invalid node ID");
-      return;
-    }
-
-    if (endNode.floor !== activeFloor) {
-      Alert.alert("Destination node is on a different plan/floor.");
       return;
     }
 
@@ -1012,52 +1187,65 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
           </View>
         ) : null}
 
-        {devModeEnabled ? (
-          <View style={styles.selectorColumn}>
-            <Text style={styles.selectorLabel}>End</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View style={styles.selectorColumn}>
+          <Text style={styles.selectorLabel}>End (All Floors)</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <TouchableOpacity
+              key="clear-end"
+              onPress={() => {
+                setSelectedEndId(null);
+                setSelectedStartId(null);
+                setRouteStartOverrideId(null);
+                setRouteNodeIds([]);
+                stopPathSimulation();
+                setFloorPaths({});
+                if (onRouteComputed) onRouteComputed([]);
+              }}
+              style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
+              <Text style={selectedEndId === null ? styles.nodeButtonTextSelected : styles.nodeButtonText}>Clear</Text>
+            </TouchableOpacity>
+            {allNodesSorted.map((node) => (
               <TouchableOpacity
-                key="clear-end"
-                onPress={() => {
-                  setSelectedEndId(null);
-                  setSelectedStartId(null);
-                  stopPathSimulation();
-                  setFloorPaths((prev) => ({ ...prev, [activeFloor]: [] }));
-                  if (onRouteComputed) onRouteComputed([]);
-                }}
-                style={[styles.nodeButton, selectedEndId === null && styles.nodeButtonSelected]}>
-                <Text style={selectedEndId === null ? styles.nodeButtonTextSelected : styles.nodeButtonText}>Clear</Text>
+                key={`picker-${node.id}`}
+                onPress={() => handleNodeSelection(node)}
+                style={[
+                  styles.nodeButton,
+                  node.floor !== activeFloor && styles.nodeButtonMuted,
+                  (isEditMode ? editingNodeId === node.id : selectedEndId === node.id) && styles.nodeButtonSelected,
+                ]}>
+                <Text
+                  style={
+                    (isEditMode ? editingNodeId === node.id : selectedEndId === node.id)
+                      ? styles.nodeButtonTextSelected
+                      : styles.nodeButtonText
+                  }>
+                  {`${FLOOR_LABELS[node.floor] ?? node.floor} ${node.id}`}
+                </Text>
               </TouchableOpacity>
-              {nodesOnCurrentFloor.map((node) => (
-                <TouchableOpacity
-                  key={node.id}
-                  onPress={() => {
-                    if (isEditMode) {
-                      setEditingNodeId(node.id);
-                      return;
-                    }
-                    setSelectedEndId(node.id);
-                  }}
-                  style={[
-                    styles.nodeButton,
-                    (isEditMode ? editingNodeId === node.id : selectedEndId === node.id) && styles.nodeButtonSelected,
-                  ]}>
-                  <Text
-                    style={
-                      (isEditMode ? editingNodeId === node.id : selectedEndId === node.id)
-                        ? styles.nodeButtonTextSelected
-                        : styles.nodeButtonText
-                    }>
-                    {node.id}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        ) : null}
+            ))}
+          </ScrollView>
+        </View>
       </View>
 
       <View style={styles.editContainer}>
+        {upcomingFloorTransition ? (
+          <View style={styles.transitionCard}>
+            <Text style={styles.transitionTitle}>Next Floor Transition</Text>
+            <Text style={styles.transitionText}>
+              {`${upcomingFloorTransition.connector}: ${upcomingFloorTransition.fromId} (${FLOOR_LABELS[upcomingFloorTransition.fromFloor] ?? upcomingFloorTransition.fromFloor}) -> ${upcomingFloorTransition.toId} (${FLOOR_LABELS[upcomingFloorTransition.toFloor] ?? upcomingFloorTransition.toFloor})`}
+            </Text>
+            <TouchableOpacity
+              style={styles.transitionBtn}
+              onPress={() => {
+                transitionToRouteFloor(upcomingFloorTransition);
+              }}>
+              <Text style={styles.transitionBtnText}>
+                {`Show ${FLOOR_LABELS[upcomingFloorTransition.toFloor] ?? upcomingFloorTransition.toFloor} Floor Segment`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {devModeEnabled ? (
           <TouchableOpacity
             style={[styles.editToggleButton, shouldShowNodes && styles.editToggleButtonActive]}
@@ -1216,31 +1404,32 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         ) : null}
       </View>
 
-      <ImageZoom
-        ref={imageZoomRef}
-        cropWidth={cropWidth}
-        cropHeight={cropHeight}
-        imageWidth={imageWidth}
-        imageHeight={imageHeight}
-        minScale={minScale}
-        maxScale={safeMaxScale}
-        onMove={(event: any) => {
-          const nextScale = typeof event?.scale === "number" && Number.isFinite(event.scale) ? event.scale : 1;
-          if (Math.abs(nextScale - zoomScaleRef.current) < 0.02) return;
-          zoomScaleRef.current = nextScale;
-          setZoomScale(nextScale);
-        }}
-        onClick={handleMapTap}
-        enableCenterFocus={false}>
-        <View>
-          <ExpoImage
-            source={activeImage}
-            style={{ width: imageWidth, height: imageHeight }}
-            contentFit="contain"
-            contentPosition="center"
-            allowDownscaling={false}
-            transition={0}
-          />
+      <Animated.View style={{ opacity: mapOpacity }}>
+        <ImageZoom
+          ref={imageZoomRef}
+          cropWidth={cropWidth}
+          cropHeight={cropHeight}
+          imageWidth={imageWidth}
+          imageHeight={imageHeight}
+          minScale={minScale}
+          maxScale={safeMaxScale}
+          onMove={(event: any) => {
+            const nextScale = typeof event?.scale === "number" && Number.isFinite(event.scale) ? event.scale : 1;
+            if (Math.abs(nextScale - zoomScaleRef.current) < 0.02) return;
+            zoomScaleRef.current = nextScale;
+            setZoomScale(nextScale);
+          }}
+          onClick={handleMapTap}
+          enableCenterFocus={false}>
+          <View>
+            <ExpoImage
+              source={activeImage}
+              style={{ width: imageWidth, height: imageHeight }}
+              contentFit="contain"
+              contentPosition="center"
+              allowDownscaling={false}
+              transition={0}
+            />
 
           <Svg width={imageWidth} height={imageHeight} style={StyleSheet.absoluteFillObject}>
             {isRoutingPlan && renderedPathPoints.length > 1 && (
@@ -1363,9 +1552,10 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
                 />
               </G>
             ) : null}
-          </Svg>
-        </View>
-      </ImageZoom>
+            </Svg>
+          </View>
+        </ImageZoom>
+      </Animated.View>
     </View>
   );
 }
@@ -1400,6 +1590,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 8,
     gap: 8,
+  },
+  transitionCard: {
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff",
+    borderRadius: 10,
+    padding: 10,
+    gap: 6,
+  },
+  transitionTitle: {
+    color: "#1e3a8a",
+    fontWeight: "800",
+    fontSize: 12,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  transitionText: {
+    color: "#1f2937",
+    fontWeight: "600",
+  },
+  transitionBtn: {
+    alignSelf: "flex-start",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#1d4ed8",
+    backgroundColor: "#dbeafe",
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  transitionBtnText: {
+    color: "#1e3a8a",
+    fontWeight: "700",
   },
   editToggleButton: {
     alignSelf: "flex-start",
@@ -1553,6 +1775,9 @@ const styles = StyleSheet.create({
   },
   nodeButtonSelected: {
     backgroundColor: "#4CAF50",
+  },
+  nodeButtonMuted: {
+    opacity: 0.75,
   },
   nodeButtonText: {
     color: "#222",
