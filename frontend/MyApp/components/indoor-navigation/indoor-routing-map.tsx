@@ -25,6 +25,10 @@ import {
     View,
 } from "react-native";
 import ImageZoom from "react-native-image-pan-zoom";
+
+// react-native-image-pan-zoom types are missing onMove and have stale ref types; cast to any.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ImageZoomPan = ImageZoom as unknown as React.ComponentType<any>;
 import Svg, { Circle, G, Polyline, Text as SvgText } from "react-native-svg";
 
 type Props = {
@@ -652,35 +656,36 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         });
       });
 
-      if (!best || best.dist > EDGE_TAP_THRESHOLD_PX) {
+      const capturedBest = best as { fromId: string; toId: string; x: number; y: number; dist: number } | null;
+      if (!capturedBest || capturedBest.dist > EDGE_TAP_THRESHOLD_PX) {
         Alert.alert("Tap closer to an edge", "Add Node mode inserts along the nearest edge.");
         return;
       }
 
       setGraph((prev) => {
-        const from = prev.nodes.find((n) => n.id === best.fromId);
-        const to = prev.nodes.find((n) => n.id === best.toId);
+        const from = prev.nodes.find((n) => n.id === capturedBest.fromId);
+        const to = prev.nodes.find((n) => n.id === capturedBest.toId);
         if (!from || !to) return prev;
 
         const newId = generateNextNodeId(prev.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
         const newNode: GraphNode = {
           id: newId,
-          x: Math.round(best.x),
-          y: Math.round(best.y),
+          x: Math.round(capturedBest.x),
+          y: Math.round(capturedBest.y),
           floor: activeFloor,
         };
 
         const nextEdges: Record<string, Edge[]> = { ...prev.edges };
-        removeDirectedEdge(nextEdges, best.fromId, best.toId);
-        removeDirectedEdge(nextEdges, best.toId, best.fromId);
+        removeDirectedEdge(nextEdges, capturedBest.fromId, capturedBest.toId);
+        removeDirectedEdge(nextEdges, capturedBest.toId, capturedBest.fromId);
 
         const w1 = Math.max(1, Math.round(distance(from, newNode)));
         const w2 = Math.max(1, Math.round(distance(newNode, to)));
 
-        upsertEdge(nextEdges, best.fromId, newId, w1);
-        upsertEdge(nextEdges, newId, best.fromId, w1);
-        upsertEdge(nextEdges, newId, best.toId, w2);
-        upsertEdge(nextEdges, best.toId, newId, w2);
+        upsertEdge(nextEdges, capturedBest.fromId, newId, w1);
+        upsertEdge(nextEdges, newId, capturedBest.fromId, w1);
+        upsertEdge(nextEdges, newId, capturedBest.toId, w2);
+        upsertEdge(nextEdges, capturedBest.toId, newId, w2);
 
         return {
           nodes: [...prev.nodes, newNode],
@@ -690,7 +695,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
 
       const newNodeId = generateNextNodeId(graph.nodes, activePlanId === "HOME_MAIN" ? "H" : activePlanId.includes("ENG3") ? "3N" : "N");
       setEditingNodeId(newNodeId);
-      setEdgeNodeA(best.fromId);
+      setEdgeNodeA(capturedBest.fromId);
       setEdgeNodeB(newNodeId);
       return;
     }
@@ -1005,16 +1010,17 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
         });
       });
 
-      if (best) {
+      const capturedBestEdge = best as { fromId: string; toId: string; x: number; y: number; dist: number } | null;
+      if (capturedBestEdge) {
         const tempStart: GraphNode = {
           id: TEMP_START_NODE_ID,
-          x: Math.round(best.x),
-          y: Math.round(best.y),
+          x: Math.round(capturedBestEdge.x),
+          y: Math.round(capturedBestEdge.y),
           floor: activeFloor,
         };
 
-        const from = nodeById.get(best.fromId);
-        const to = nodeById.get(best.toId);
+        const from = nodeById.get(capturedBestEdge.fromId);
+        const to = nodeById.get(capturedBestEdge.toId);
         if (from && to) {
           routeNodes = [...allNodes, tempStart];
           routeEdges = {};
@@ -1405,7 +1411,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
       </View>
 
       <Animated.View style={{ opacity: mapOpacity }}>
-        <ImageZoom
+        <ImageZoomPan
           ref={imageZoomRef}
           cropWidth={cropWidth}
           cropHeight={cropHeight}
@@ -1554,7 +1560,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
             ) : null}
             </Svg>
           </View>
-        </ImageZoom>
+        </ImageZoomPan>
       </Animated.View>
     </View>
   );
