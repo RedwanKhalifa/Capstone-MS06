@@ -1,6 +1,6 @@
 import type { RoutingEdge, RoutingGraph, RoutingNode } from '@/lib/storage';
 
-export const MINIMUM_ROUTING_GRAPH_VERSION = 12;
+export const MINIMUM_ROUTING_GRAPH_VERSION = 14;
 
 const DEFAULT_NODES: RoutingNode[] = [
   { id: '3N1', x: 447, y: 192, floor: 3 },
@@ -211,13 +211,13 @@ const DEFAULT_NODES: RoutingNode[] = [
 
 const DEFAULT_EDGES: Record<string, RoutingEdge[]> = {
   '3N1': [{ target: '3N9', weight: 25 }, { target: '3N17', weight: 17 }, { target: '3N24', weight: 34 }],
-  '3N2': [{ target: '3N3', weight: 83 }, { target: '3N16', weight: 32 }],
-  '3N3': [{ target: '3N2', weight: 83 }, { target: '3N4', weight: 29 }, { target: '3N7', weight: 33 }],
+  '3N2': [{ target: '3N3', weight: 83 }, { target: '3N16', weight: 32 }, { target: '3N51', weight: 574 }],
+  '3N3': [{ target: '3N2', weight: 83 }, { target: '3N4', weight: 29 }, { target: '3N7', weight: 33 }, { target: '3N53', weight: 578 }],
   '3N4': [{ target: '3N3', weight: 29 }, { target: '3N7', weight: 23 }, { target: 'N32', weight: 30 }],
   '3N5': [{ target: '3N6', weight: 52 }, { target: '3N18', weight: 18 }],
   '3N6': [{ target: '3N5', weight: 52 }, { target: '3N19', weight: 24 }],
-  '3N7': [{ target: '3N4', weight: 23 }, { target: '3N8', weight: 110 }, { target: '3N3', weight: 33 }],
-  '3N8': [{ target: '3N7', weight: 110 }, { target: '3N23', weight: 41 }],
+  '3N7': [{ target: '3N4', weight: 23 }, { target: '3N8', weight: 110 }, { target: '3N3', weight: 33 }, { target: '3N54', weight: 578 }],
+  '3N8': [{ target: '3N7', weight: 110 }, { target: '3N23', weight: 41 }, { target: '3N55', weight: 578 }],
   '3N9': [{ target: '3N1', weight: 25 }, { target: '3N10', weight: 14 }],
   '3N10': [{ target: '3N9', weight: 14 }, { target: '3N11', weight: 34 }],
   '3N11': [{ target: '3N10', weight: 34 }, { target: '3N12', weight: 26 }],
@@ -260,11 +260,11 @@ const DEFAULT_EDGES: Record<string, RoutingEdge[]> = {
   '3N48': [{ target: '3N47', weight: 68 }, { target: '3N49', weight: 74 }],
   '3N49': [{ target: '3N48', weight: 74 }, { target: '3N50', weight: 70 }],
   '3N50': [{ target: '3N49', weight: 70 }, { target: '3N20', weight: 57 }],
-  '3N51': [{ target: '3N52', weight: 88 }, { target: '3N97', weight: 24 }],
+  '3N51': [{ target: '3N52', weight: 88 }, { target: '3N97', weight: 24 }, { target: '3N2', weight: 574 }],
   '3N52': [{ target: '3N51', weight: 88 }, { target: '3N53', weight: 16 }],
-  '3N53': [{ target: '3N52', weight: 16 }, { target: '3N54', weight: 36 }],
-  '3N54': [{ target: '3N53', weight: 36 }, { target: '3N55', weight: 88 }],
-  '3N55': [{ target: '3N54', weight: 88 }, { target: '3N56', weight: 38 }],
+  '3N53': [{ target: '3N52', weight: 16 }, { target: '3N54', weight: 36 }, { target: '3N3', weight: 578 }],
+  '3N54': [{ target: '3N53', weight: 36 }, { target: '3N55', weight: 88 }, { target: '3N7', weight: 578 }],
+  '3N55': [{ target: '3N54', weight: 88 }, { target: '3N56', weight: 38 }, { target: '3N8', weight: 578 }],
   '3N56': [{ target: '3N55', weight: 38 }, { target: '3N57', weight: 46 }, { target: 'N65', weight: 24 }],
   '3N57': [{ target: '3N56', weight: 46 }, { target: '3N58', weight: 126 }],
   '3N58': [{ target: '3N57', weight: 126 }, { target: '3N59', weight: 22 }],

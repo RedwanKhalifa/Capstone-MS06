@@ -22,6 +22,8 @@ export default function SettingsScreen() {
     logoutUser,
     devModeEnabled,
     setDevModeEnabled,
+    elevatorModeEnabled,
+    setElevatorModeEnabled,
   } = useAppState();
   const [unitsEnabled, setUnitsEnabled] = useState(true);
   const [guestInfoOpen, setGuestInfoOpen] = useState(false);
@@ -74,6 +76,20 @@ export default function SettingsScreen() {
       </View>
 
       <Text style={styles.sectionTitle}>Navigation</Text>
+      <View style={styles.modeCard}>
+        <View style={styles.modeCardHeader}>
+          <View>
+            <Text style={styles.modeCardTitle}>Elevator mode</Text>
+            <Text style={styles.modeCardStatus}>
+              {elevatorModeEnabled ? "ON: route floor changes through elevators" : "OFF: route floor changes through stairs"}
+            </Text>
+          </View>
+          <Switch value={elevatorModeEnabled} onValueChange={setElevatorModeEnabled} />
+        </View>
+        <Text style={styles.helperText}>
+          This setting only affects floor-plan transitions. It ignores the other connector type even when it is closer.
+        </Text>
+      </View>
       <View style={styles.row}>
         <Text style={styles.rowText}>Units (Meter/steps)</Text>
         <Switch value={unitsEnabled} onValueChange={setUnitsEnabled} />
@@ -198,6 +214,33 @@ const styles = StyleSheet.create({
     color: "#2c3ea3",
     fontWeight: "600",
   },
+  modeCard: {
+    backgroundColor: "#fff8cc",
+    borderWidth: 1,
+    borderColor: "#d5c14a",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  modeCardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  modeCardTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#1f2d86",
+  },
+  modeCardStatus: {
+    color: "#4c5679",
+    fontSize: 13,
+    marginTop: 2,
+    maxWidth: 240,
+  },
   dropdownRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -207,6 +250,11 @@ const styles = StyleSheet.create({
   dropdownText: {
     color: "#2c3ea3",
     marginBottom: 12,
+  },
+  helperText: {
+    color: "#4c5679",
+    fontSize: 13,
+    marginBottom: 4,
   },
   menuButton: {
     backgroundColor: "#2c3ea3",

@@ -63,6 +63,8 @@ const VERTICAL_CONNECTOR_LABELS: Record<string, string> = {
   [edgeKey("N32", "3N4")]: "Stairs",
   [edgeKey("N65", "3N56")]: "Elevator",
 };
+const STAIR_CONNECTOR_KEY = edgeKey("N32", "3N4");
+const ELEVATOR_CONNECTOR_KEY = edgeKey("N65", "3N56");
 const CANONICAL_IMAGE_WIDTH = 800;
 const CANONICAL_IMAGE_HEIGHT = 600;
 const MIN_RENDER_WIDTH = 1200;
@@ -215,8 +217,26 @@ function withEuclideanEdgeWeights(
   return next;
 }
 
+function withPreferredVerticalConnector(
+  edges: Record<string, Edge[]>,
+  elevatorModeEnabled: boolean
+): Record<string, Edge[]> {
+  const allowedConnectorKey = elevatorModeEnabled ? ELEVATOR_CONNECTOR_KEY : STAIR_CONNECTOR_KEY;
+
+  return Object.fromEntries(
+    Object.entries(edges).map(([fromId, outgoing]) => [
+      fromId,
+      outgoing.filter((edge) => {
+        const connectorKey = edgeKey(fromId, edge.target);
+        if (!(connectorKey in VERTICAL_CONNECTOR_LABELS)) return true;
+        return connectorKey === allowedConnectorKey;
+      }),
+    ])
+  );
+}
+
 export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
-  const { devModeEnabled } = useAppState();
+  const { devModeEnabled, elevatorModeEnabled } = useAppState();
   const positioning = usePositioning();
   const activePlanId = (positioning as any).activePlanId as "ENG4_NORTH" | "ENG4_SOUTH" | "ENG3_NORTH" | "ENG3_SOUTH" | "HOME_MAIN" ?? "ENG4_NORTH";
   const isRoutingPlan = true;
@@ -401,11 +421,16 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [MINIMUM_ROUTING_GRAPH_VERSION]);
 
   const weightedEdges = useMemo(
     () => withEuclideanEdgeWeights(graph.nodes, graph.edges),
     [graph.nodes, graph.edges]
+  );
+
+  const preferredRouteEdges = useMemo(
+    () => withPreferredVerticalConnector(weightedEdges, elevatorModeEnabled),
+    [weightedEdges, elevatorModeEnabled]
   );
 
   useEffect(() => {
@@ -948,7 +973,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     if (!endNode) return;
 
     const allNodes = graph.nodes;
-    const allEdges = weightedEdges;
+    const allEdges = preferredRouteEdges;
 
     // Prefer the live context prediction (always current) over the animation-synced state.
     const liveCanonical = {
@@ -1099,7 +1124,7 @@ export function IndoorRoutingMap({ destination, onRouteComputed }: Props) {
     selectedStartId,
     routeStartOverrideId,
     graph.nodes,
-    weightedEdges,
+    preferredRouteEdges,
     activeFloor,
     isNavigateMode,
   ]);

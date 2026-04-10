@@ -68,6 +68,8 @@ type AppStateContextValue = {
   setIsLoggedIn: (value: boolean) => void;
   devModeEnabled: boolean;
   setDevModeEnabled: (value: boolean) => void;
+  elevatorModeEnabled: boolean;
+  setElevatorModeEnabled: (value: boolean) => void;
   accessibility: AccessibilitySettings;
   setAccessibility: (value: AccessibilitySettings) => void;
   setAllAccessibility: (value: boolean) => void;
@@ -228,6 +230,7 @@ const STARTER_TIMETABLE: CalendarClassEvent[] = [
 
 const APP_STATE_STORAGE_KEY = "capstone-ms06:app-state";
 const DEV_MODE_STORAGE_FILE = `${FileSystem.documentDirectory}dev-mode.json`;
+const ELEVATOR_MODE_STORAGE_FILE = `${FileSystem.documentDirectory}elevator-mode.json`;
 
 const loadNativeDevMode = async (): Promise<boolean | null> => {
   try {
@@ -246,6 +249,29 @@ const saveNativeDevMode = async (value: boolean) => {
     await FileSystem.writeAsStringAsync(
       DEV_MODE_STORAGE_FILE,
       JSON.stringify({ devModeEnabled: value })
+    );
+  } catch {
+    // Ignore persistence failures so the app remains usable.
+  }
+};
+
+const loadNativeElevatorMode = async (): Promise<boolean | null> => {
+  try {
+    const info = await FileSystem.getInfoAsync(ELEVATOR_MODE_STORAGE_FILE);
+    if (!info.exists) return null;
+    const raw = await FileSystem.readAsStringAsync(ELEVATOR_MODE_STORAGE_FILE);
+    const parsed = JSON.parse(raw) as { elevatorModeEnabled?: boolean };
+    return typeof parsed.elevatorModeEnabled === "boolean" ? parsed.elevatorModeEnabled : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveNativeElevatorMode = async (value: boolean) => {
+  try {
+    await FileSystem.writeAsStringAsync(
+      ELEVATOR_MODE_STORAGE_FILE,
+      JSON.stringify({ elevatorModeEnabled: value })
     );
   } catch {
     // Ignore persistence failures so the app remains usable.
@@ -310,6 +336,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [calendarEvents, setCalendarEvents] = useState<CalendarClassEvent[]>([]);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [devModeEnabled, setDevModeEnabled] = useState(true);
+  const [elevatorModeEnabled, setElevatorModeEnabled] = useState(false);
   const [accessibility, setAccessibility] = useState<AccessibilitySettings>({
     highContrast: true,
     largeText: true,
@@ -332,6 +359,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           connectedCalendars?: ConnectedCalendar[];
           calendarEvents?: CalendarClassEvent[];
           devModeEnabled?: boolean;
+          elevatorModeEnabled?: boolean;
           accessibility?: AccessibilitySettings;
           saved?: SavedCollections;
         };
@@ -341,6 +369,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         if (parsed.connectedCalendars) setConnectedCalendars(parsed.connectedCalendars);
         if (parsed.calendarEvents) setCalendarEvents(parsed.calendarEvents);
         if (typeof parsed.devModeEnabled === "boolean") setDevModeEnabled(parsed.devModeEnabled);
+        if (typeof parsed.elevatorModeEnabled === "boolean") {
+          setElevatorModeEnabled(parsed.elevatorModeEnabled);
+        }
         if (parsed.accessibility) setAccessibility(parsed.accessibility);
         if (parsed.saved) setSaved(parsed.saved);
       } catch {
@@ -349,11 +380,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    loadNativeDevMode().then((value) => {
-      if (typeof value === "boolean") {
-        setDevModeEnabled(value);
+    Promise.all([loadNativeDevMode(), loadNativeElevatorMode()]).then(
+      ([savedDevMode, savedElevatorMode]) => {
+        if (typeof savedDevMode === "boolean") {
+          setDevModeEnabled(savedDevMode);
+        }
+        if (typeof savedElevatorMode === "boolean") {
+          setElevatorModeEnabled(savedElevatorMode);
+        }
       }
-    });
+    );
   }, []);
 
   useEffect(() => {
@@ -367,6 +403,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             connectedCalendars,
             calendarEvents,
             devModeEnabled,
+            elevatorModeEnabled,
             accessibility,
             saved,
           })
@@ -377,8 +414,20 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    saveNativeDevMode(devModeEnabled);
-  }, [accountRecord, studentAccount, connectedCalendars, calendarEvents, devModeEnabled, accessibility, saved]);
+    void Promise.all([
+      saveNativeDevMode(devModeEnabled),
+      saveNativeElevatorMode(elevatorModeEnabled),
+    ]);
+  }, [
+    accountRecord,
+    studentAccount,
+    connectedCalendars,
+    calendarEvents,
+    devModeEnabled,
+    elevatorModeEnabled,
+    accessibility,
+    saved,
+  ]);
 
   const setAllAccessibility = (value: boolean) => {
     setAccessibility({
@@ -500,6 +549,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setIsLoggedIn,
       devModeEnabled,
       setDevModeEnabled,
+      elevatorModeEnabled,
+      setElevatorModeEnabled,
       accessibility,
       setAccessibility,
       setAllAccessibility,
@@ -510,6 +561,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       studentAccount,
       isLoggedIn,
       devModeEnabled,
+      elevatorModeEnabled,
       accessibility,
       saved,
       connectedCalendars,
